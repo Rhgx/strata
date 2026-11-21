@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Strata ribbon icon, Studio Light theme. Front wedge, amber summit wedge behind it (2 px
+       seam parallel to the front wedge's right slope), slightly rounded corners, then two
+       strata bars. Flat colors only. -->
+  <path d="M4.200,18.000 Q3.000,18.000 3.688,17.017 L9.312,8.983 Q10.000,8.000 10.688,8.983 L16.312,17.017 Q17.000,18.000 15.800,18.000 Z" fill="#5E5E5E"/>
+  <path d="M15.799,12.803 Q15.110,11.820 15.746,10.803 L19.364,5.017 Q20.000,4.000 20.649,5.009 L28.351,16.991 Q29.000,18.000 27.800,18.000 L20.640,18.000 Q19.440,18.000 18.751,17.017 Z" fill="#C85A08"/>
+  <rect x="3" y="20" width="26" height="2" rx="0.75" fill="#5E5E5E"/>
+  <path d="M3 24 H29 V26 A2 2 0 0 1 27 28 H5 A2 2 0 0 1 3 26 Z" fill="#5E5E5E"/>
+</svg>

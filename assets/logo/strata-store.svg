@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Strata store icon (512 px). The 32 px ribbon icon scaled 14x and centered: flat solid
+       colors only, no shading, like Roblox's own icons. -->
+  <rect width="512" height="512" fill="#1E2024"/>
+  <g transform="translate(32,32) scale(14)">
+    <path d="M4.200,18.000 Q3.000,18.000 3.688,17.017 L9.312,8.983 Q10.000,8.000 10.688,8.983 L16.312,17.017 Q17.000,18.000 15.800,18.000 Z" fill="#E1E1E1"/>
+    <path d="M15.799,12.803 Q15.110,11.820 15.746,10.803 L19.364,5.017 Q20.000,4.000 20.649,5.009 L28.351,16.991 Q29.000,18.000 27.800,18.000 L20.640,18.000 Q19.440,18.000 18.751,17.017 Z" fill="#FFA133"/>
+    <rect x="3" y="20" width="26" height="2" rx="0.35" fill="#E1E1E1"/>
+    <path d="M3 24 H29 V26 A2 2 0 0 1 27 28 H5 A2 2 0 0 1 3 26 Z" fill="#E1E1E1"/>
+  </g>
+</svg>
