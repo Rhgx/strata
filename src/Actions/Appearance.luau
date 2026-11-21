@@ -11,9 +11,13 @@
 
 local MaterialService = game:GetService("MaterialService")
 
+local Displacement = require(script.Parent.Parent.Core.Displacement)
+local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Recording = require(script.Parent.Recording)
+
+type Opened = TerrainInstance.Opened
 
 export type Change = {
 	material: Enum.Material?,
@@ -80,17 +84,25 @@ function Appearance.variants(material: Enum.Material): { string }
 	return names
 end
 
--- The parts showing a tile: its baked union and any wedges.
+-- The parts showing a tile's own look: its baked union and the wedges of unpainted triangles
+-- (painted ones keep their looks).
 local function partsOf(model: Model): { BasePart }
 	local parts: { BasePart } = {}
 	local surface = model:FindFirstChild("Surface")
 	if surface and surface:IsA("BasePart") then
 		table.insert(parts, surface)
 	end
+	local config = model:FindFirstChild("DispData")
+	local triLooks = if config then config:GetAttribute("TriLooks") else nil
 	local tris = model:FindFirstChild("Tris")
 	if tris then
 		for _, child in tris:GetChildren() do
-			if child:IsA("BasePart") then
+			local n = tonumber(child.Name)
+			if not child:IsA("BasePart") or not n then
+				continue
+			end
+			local t = (n + 1) // 2
+			if typeof(triLooks) ~= "string" or string.sub(triLooks, t, t) == "0" then
 				table.insert(parts, child)
 			end
 		end
@@ -152,6 +164,36 @@ function Appearance.apply(change: Change, name: string): number
 		end
 	end)
 	return #plans
+end
+
+-- Removes painted materials from the selected tiles (back to each tile's own look), as one undo
+-- step. Baked tiles show wedges until baked again. Returns how many tiles changed.
+function Appearance.clearPaint(): number
+	local targets: { Opened } = {}
+	for _, opened in Query.selectedTiles() do
+		if Displacement.isPainted(opened.disp) then
+			table.insert(targets, opened)
+		end
+	end
+	if #targets == 0 then
+		return 0
+	end
+	Recording.run("Strata clear painted materials", function()
+		for _, opened in targets do
+			local disp = opened.disp
+			local triangles: { number } = {}
+			for t, index in disp.triLooks do
+				if index ~= 0 then
+					disp.triLooks[t] = 0
+					table.insert(triangles, t)
+				end
+			end
+			Session.updateLooks(opened, triangles)
+			TerrainInstance.save(opened)
+		end
+		Recording.autoBake()
+	end)
+	return #targets
 end
 
 -- Copies the material, color and variant of `part` onto the selected tiles.

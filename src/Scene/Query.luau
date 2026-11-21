@@ -31,6 +31,8 @@ export type SelectionInfo = {
 	variant: string?,
 	-- Whether any selected tile uses a material variant.
 	anyVariant: boolean,
+	-- Selected tiles with painted materials.
+	painted: number,
 }
 
 export type Appearance = {
@@ -163,11 +165,18 @@ function Query.tilesNear(part: BasePart, pad: number): { Opened }
 	return Session.getAll(models)
 end
 
--- The look a tile shows right now, read from its baked union or first wedge (so edits made
--- with Studio's own tools count), falling back to its saved data. Never opens the tile.
+-- Whether any triangle of the tile has a painted look (from its saved data).
+function Query.isPainted(model: Model): boolean
+	local config = model:FindFirstChild("DispData")
+	return config ~= nil and config:GetAttribute("TriLooks") ~= nil
+end
+
+-- The tile's own look (painted triangles aside) as it shows right now: read from its baked
+-- union, or a wedge on an unpainted tile (so edits made with Studio's own tools count), falling
+-- back to its saved data. Never opens the tile.
 function Query.appearanceOf(model: Model): Appearance?
 	local shown: Instance? = model:FindFirstChild("Surface")
-	if not shown then
+	if not shown and not Query.isPainted(model) and not TerrainInstance.isBaked(model) then
 		local tris = model:FindFirstChild("Tris")
 		shown = if tris then tris:FindFirstChildWhichIsA("BasePart") else nil
 	end
@@ -202,7 +211,11 @@ function Query.selectionInfo(): SelectionInfo
 	local material: Enum.Material?, color: Color3?, variant: string? = nil, nil, nil
 	local mixedMaterial, mixedColor, mixedVariant = false, false, false
 	local anyVariant = false
+	local painted = 0
 	for index, model in models do
+		if Query.isPainted(model) then
+			painted += 1
+		end
 		local look = Query.appearanceOf(model)
 		if look then
 			if index == 1 then
@@ -239,6 +252,7 @@ function Query.selectionInfo(): SelectionInfo
 		color = if mixedColor then nil else color,
 		variant = if mixedVariant then nil else variant,
 		anyVariant = anyVariant,
+		painted = painted,
 	}
 end
 

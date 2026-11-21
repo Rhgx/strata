@@ -5,12 +5,14 @@
 		<Model>  tagged StrataDisplacement, pivot = displacement origin
 		├─ DispData (Configuration)  the editable source data, as attributes
 		├─ Tris (Folder)             generated WedgeParts, while editing
-		└─ Surface (UnionOperation)  the wedges merged into one part, once baked
+		├─ Surface (UnionOperation)  the wedges in the tile's own look, merged, once baked
+		└─ Surface_1, Surface_2 ...  one union per painted look (look 1, 2, ...), once baked
 
-	A displacement is either editing (wedges) or baked (one union). Baking exists because
+	A displacement is either editing (wedges) or baked (unions). Baking exists because
 	Roblox projects a material separately on every part: on wedges the texture is rotated
-	per triangle, while a union gets one continuous projection. Editing a baked displacement
-	brings the wedges back from DispData.
+	per triangle, while a union gets one continuous projection. A union has a single material,
+	so painted looks bake into their own unions; Surface is missing when paint covers the whole
+	tile. Editing a baked displacement brings the wedges back from DispData.
 
 	The model only holds parts and attributes, so it can be published and inserted like any
 	other model, then reopened by the plugin for editing.
@@ -125,6 +127,7 @@ function TerrainInstance.open(model: Model): Opened
 	}
 end
 
+-- The baked union in the tile's own look, if baked and any triangle uses that look.
 function TerrainInstance.surface(model: Model): UnionOperation?
 	local surface = model:FindFirstChild(SURFACE_NAME)
 	if surface and surface:IsA("UnionOperation") then
@@ -133,21 +136,57 @@ function TerrainInstance.surface(model: Model): UnionOperation?
 	return nil
 end
 
-function TerrainInstance.isBaked(model: Model): boolean
-	return TerrainInstance.surface(model) ~= nil
+-- The look number of a baked union (0 for Surface, k for Surface_k), or nil for other children.
+function TerrainInstance.surfaceLook(inst: Instance): number?
+	if not inst:IsA("UnionOperation") then
+		return nil
+	end
+	if inst.Name == SURFACE_NAME then
+		return 0
+	end
+	local k = string.match(inst.Name, "^" .. SURFACE_NAME .. "_(%d+)$")
+	return if k then tonumber(k) else nil
 end
 
--- Prepares a displacement for editing: removes the baked union if there is one and
--- regenerates any missing or extra wedges (for example after a power change, or if parts were
--- deleted by hand). Instances are unparented rather than destroyed so undo can restore them.
--- The part that shows the tile right now: the baked union, or its first wedge.
+-- Every baked union of the tile (its own look and each painted look).
+function TerrainInstance.surfaces(model: Model): { UnionOperation }
+	local result: { UnionOperation } = {}
+	for _, child in model:GetChildren() do
+		if child:IsA("UnionOperation") and TerrainInstance.surfaceLook(child) ~= nil then
+			table.insert(result, child)
+		end
+	end
+	return result
+end
+
+function TerrainInstance.isBaked(model: Model): boolean
+	return #TerrainInstance.surfaces(model) > 0
+end
+
+-- Unparents every baked union (rather than destroying, so undo can bring them back).
+function TerrainInstance.removeSurfaces(model: Model)
+	for _, surface in TerrainInstance.surfaces(model) do
+		surface.Parent = nil
+	end
+end
+
+-- The part that shows the tile's own look right now: its baked union, or the first wedge of a
+-- triangle in that look. Nil when paint covers the whole tile.
 local function shownPart(opened: Opened): BasePart?
 	local surface = TerrainInstance.surface(opened.model)
 	if surface then
 		return surface
 	end
-	local wedge = opened.wedges.parts[1]
-	return if wedge and wedge.Parent == opened.wedges.folder then wedge else nil
+	if TerrainInstance.isBaked(opened.model) then
+		return nil
+	end
+	for t, index in opened.disp.triLooks do
+		if index == 0 then
+			local wedge = opened.wedges.parts[t * 2 - 1]
+			return if wedge and wedge.Parent == opened.wedges.folder then wedge else nil
+		end
+	end
+	return nil
 end
 
 --[[
@@ -157,29 +196,47 @@ end
 	the saved data. Returns whether anything changed (and was saved).
 ]]
 function TerrainInstance.adoptAppearance(opened: Opened): boolean
-	local part = shownPart(opened)
 	local disp = opened.disp
+	local changed = false
+	local part = shownPart(opened)
 	if
-		not part
-		or (part.Material == disp.material and part.Color == disp.color and part.MaterialVariant == disp.materialVariant)
+		part
+		and not (part.Material == disp.material and part.Color == disp.color and part.MaterialVariant == disp.materialVariant)
 	then
-		return false
+		disp.material = part.Material
+		disp.color = part.Color
+		disp.materialVariant = part.MaterialVariant
+		changed = true
 	end
-	disp.material = part.Material
-	disp.color = part.Color
-	disp.materialVariant = part.MaterialVariant
-	Displacement.save(disp, opened.config)
-	return true
+	-- Painted looks too, from their baked unions (wedges in a painted look are not checked).
+	for _, surface in TerrainInstance.surfaces(opened.model) do
+		local index = TerrainInstance.surfaceLook(surface)
+		local look = if index and index > 0 then disp.looks[index] else nil
+		if
+			look
+			and not (surface.Material == look.material and surface.Color == look.color and surface.MaterialVariant == look.variant)
+		then
+			disp.looks[index :: number] = { material = surface.Material, color = surface.Color, variant = surface.MaterialVariant }
+			changed = true
+		end
+	end
+	if changed then
+		Displacement.save(disp, opened.config)
+	end
+	return changed
 end
 
--- Gives the tile a new look: saves it and applies it to the wedges and the baked union.
+-- Gives the tile's own look new values: saves them and applies them to the wedges and the baked
+-- union in that look. Painted triangles keep their looks.
 function TerrainInstance.setAppearance(opened: Opened, material: Enum.Material, color: Color3, variant: string)
 	local disp = opened.disp
 	disp.material, disp.color, disp.materialVariant = material, color, variant
 	Displacement.save(disp, opened.config)
 	local parts: { BasePart } = {}
-	for _, wedge in opened.wedges.parts do
-		table.insert(parts, wedge)
+	for n, wedge in opened.wedges.parts do
+		if disp.triLooks[(n + 1) // 2] == 0 then
+			table.insert(parts, wedge)
+		end
 	end
 	local surface = TerrainInstance.surface(opened.model)
 	if surface then
@@ -192,13 +249,13 @@ function TerrainInstance.setAppearance(opened: Opened, material: Enum.Material, 
 	end
 end
 
+-- Prepares a displacement for editing: removes the baked unions if there are any and
+-- regenerates any missing or extra wedges (for example after a power change, or if parts were
+-- deleted by hand). Instances are unparented rather than destroyed so undo can restore them.
 -- Returns whether wedges had to be built (which can take a moment on dense tiles).
 function TerrainInstance.ensureWedges(opened: Opened): boolean
 	TerrainInstance.adoptAppearance(opened)
-	local surface = TerrainInstance.surface(opened.model)
-	if surface then
-		surface.Parent = nil
-	end
+	TerrainInstance.removeSurfaces(opened.model)
 	if not WedgeBuilder.isComplete(opened.disp, opened.wedges) then
 		WedgeBuilder.rebuild(opened.disp, opened.wedges, opened.model:GetPivot())
 		return true
@@ -247,62 +304,11 @@ local function union(anchor: BasePart, parts: { BasePart }, collision: Enum.Coll
 	return if first and first:IsA("UnionOperation") then first else nil
 end
 
--- Merges the wedges into one union so the material maps continuously. Yields while the union
--- is computed. Does nothing if the displacement is already baked.
-function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
-	if TerrainInstance.isBaked(opened.model) then
-		return
-	end
-	TerrainInstance.adoptAppearance(opened)
-	local pivot = opened.model:GetPivot()
-	local disp = opened.disp
-	local faceNormal = Displacement.faceNormal(disp)
-
-	local parts: { BasePart } = {}
-	local slabCFrame, slabSize = flatSlab(disp)
-	local slab: Part? = nil
-	if slabCFrame and slabSize then
-		local part = Instance.new("Part")
-		part.Anchored = true
-		part.Size = slabSize
-		part.CFrame = pivot * slabCFrame
-		parts = { part }
-		slab = part
-	else
-		TerrainInstance.ensureWedges(opened)
-		for n = 1, Displacement.triangleCount(disp) * 2 do
-			table.insert(parts, opened.wedges.parts[n])
-		end
-	end
-
-	-- A union takes its CFrame from the first part, and Roblox projects the material in the
-	-- union's local space. Starting with a tiny cube aligned to the model pivot gives every
-	-- baked tile the same texture axes and the same origin relative to its corner, so patterns
-	-- line up across neighboring tiles. The cube must not touch the surface: when it overlaps
-	-- it, UnionAsync can silently return only the cube. So it sits below the lowest point of the
-	-- surface (sculpted tiles can dip far below their flat face), and is cut away afterwards.
-	-- The helper parts are never parented, so they stay out of the place and the undo history.
-	local i1, i2, i3 = Displacement.triangle(disp, 1)
-	local centroid = (
-		Displacement.position(disp, i1, faceNormal)
-		+ Displacement.position(disp, i2, faceNormal)
-		+ Displacement.position(disp, i3, faceNormal)
-	) / 3
-	local lowest = math.huge
-	for _, position in Displacement.positions(disp, faceNormal) do
-		lowest = math.min(lowest, position:Dot(faceNormal))
-	end
-	local depth = centroid:Dot(faceNormal) - lowest + WedgeBuilder.THICKNESS + ANCHOR_DEPTH
-	local anchorCFrame = CFrame.new(pivot * (centroid - faceNormal * depth)) * pivot.Rotation
-	local anchor = Instance.new("Part")
-	anchor.Anchored = true
-	anchor.Size = Vector3.new(ANCHOR_SIZE, ANCHOR_SIZE, ANCHOR_SIZE)
-	anchor.CFrame = anchorCFrame
-
-	local corners = disp.corners
-	local expectedExtent = math.max((corners[3] - corners[1]).Magnitude, (corners[4] - corners[2]).Magnitude)
+-- Unions `parts` with the anchor cube, then cuts the cube away. `extent` is the size the result
+-- should roughly have, to catch a union that silently came out empty. Yields.
+local function bakeGroup(anchor: BasePart, anchorCFrame: CFrame, parts: { BasePart }, extent: number): UnionOperation
 	local function usable(result: UnionOperation?): boolean
-		return result ~= nil and result.Size.Magnitude >= expectedExtent * 0.5
+		return result ~= nil and result.Size.Magnitude >= extent * 0.5
 	end
 
 	-- The first union is only an intermediate (the cut below makes the final part), so it skips
@@ -310,7 +316,6 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	local merged = union(anchor, parts, Enum.CollisionFidelity.Box)
 	-- Guard against a collapsed union (only the cube): keep the wedges and report it instead.
 	if not merged or not usable(merged) then
-		anchor:Destroy()
 		if merged then
 			merged:Destroy()
 		end
@@ -331,36 +336,136 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	end)
 	cutter:Destroy()
 	local cut = if cutOk and cutResult[1] and cutResult[1]:IsA("UnionOperation") then cutResult[1] else nil
-	local result: UnionOperation
 	if cut and usable(cut) then
 		merged:Destroy()
-		result = cut
-	else
-		-- The cut failed: redo the union with precise collision and keep the harmless speck
-		-- under the surface, rather than shipping box collision.
-		merged:Destroy()
-		local precise = union(anchor, parts, Enum.CollisionFidelity.PreciseConvexDecomposition)
-		if not precise or not usable(precise) then
-			anchor:Destroy()
-			error("the union came out empty; the displacement was left as wedges", 0)
-		end
-		result = precise
+		return cut
 	end
+	-- The cut failed: redo the union with precise collision and keep the harmless speck under the
+	-- surface, rather than shipping box collision.
+	merged:Destroy()
+	local precise = union(anchor, parts, Enum.CollisionFidelity.PreciseConvexDecomposition)
+	if not precise or not usable(precise) then
+		if precise then
+			precise:Destroy()
+		end
+		error("the union came out empty; the displacement was left as wedges", 0)
+	end
+	return precise
+end
+
+--[[
+	Merges the wedges into unions so the material maps continuously: one union per look the tile
+	shows (Roblox gives a union a single material), so an unpainted tile bakes to one Surface.
+	Yields while the unions are computed. Does nothing if the displacement is already baked. If
+	any union fails, none are kept and the tile stays as wedges.
+]]
+function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
+	if TerrainInstance.isBaked(opened.model) then
+		return
+	end
+	TerrainInstance.adoptAppearance(opened)
+	local pivot = opened.model:GetPivot()
+	local disp = opened.disp
+	local faceNormal = Displacement.faceNormal(disp)
+	local positions = Displacement.positions(disp, faceNormal)
+
+	-- The triangles of each look, in look order (the tile's own look first).
+	local groups: { [number]: { number } } = {}
+	local order: { number } = {}
+	for t, index in disp.triLooks do
+		local group = groups[index]
+		if not group then
+			group = {}
+			groups[index] = group
+			table.insert(order, index)
+		end
+		table.insert(group, t)
+	end
+	table.sort(order)
+
+	-- A tile in a single look that is flat bakes from one slab instead of its wedges.
+	local slab: Part? = nil
+	local slabCFrame, slabSize = nil, nil
+	if #order == 1 then
+		slabCFrame, slabSize = flatSlab(disp)
+	end
+	if slabCFrame and slabSize then
+		local part = Instance.new("Part")
+		part.Anchored = true
+		part.Size = slabSize
+		part.CFrame = pivot * slabCFrame
+		slab = part
+	else
+		TerrainInstance.ensureWedges(opened)
+	end
+
+	-- A union takes its CFrame from the first part, and Roblox projects the material in the
+	-- union's local space. Starting every union with the same tiny cube aligned to the model pivot
+	-- gives every baked piece the same texture axes and the same origin relative to the tile's
+	-- corner, so patterns line up across neighboring tiles and across painted borders. The cube
+	-- must not touch the surface: when it overlaps it, UnionAsync can silently return only the
+	-- cube. So it sits below the lowest point of the surface (sculpted tiles can dip far below
+	-- their flat face), and is cut away afterwards. The helper parts are never parented, so they
+	-- stay out of the place and the undo history.
+	local i1, i2, i3 = Displacement.triangle(disp, 1)
+	local centroid = (positions[i1] + positions[i2] + positions[i3]) / 3
+	local lowest = math.huge
+	for _, position in positions do
+		lowest = math.min(lowest, position:Dot(faceNormal))
+	end
+	local depth = centroid:Dot(faceNormal) - lowest + WedgeBuilder.THICKNESS + ANCHOR_DEPTH
+	local anchorCFrame = CFrame.new(pivot * (centroid - faceNormal * depth)) * pivot.Rotation
+	local anchor = Instance.new("Part")
+	anchor.Anchored = true
+	anchor.Size = Vector3.new(ANCHOR_SIZE, ANCHOR_SIZE, ANCHOR_SIZE)
+	anchor.CFrame = anchorCFrame
+
+	local results: { [number]: UnionOperation } = {}
+	local ok, err = pcall(function()
+		for _, index in order do
+			local triangles = groups[index]
+			local parts: { BasePart } = {}
+			local min, max = Vector3.one * math.huge, -Vector3.one * math.huge
+			for _, t in triangles do
+				local a, b, c = Displacement.triangle(disp, t)
+				for _, v in { a, b, c } do
+					min = min:Min(positions[v])
+					max = max:Max(positions[v])
+				end
+				if not slab then
+					table.insert(parts, opened.wedges.parts[t * 2 - 1])
+					table.insert(parts, opened.wedges.parts[t * 2])
+				end
+			end
+			if slab then
+				parts = { slab }
+			end
+			results[index] = bakeGroup(anchor, anchorCFrame, parts, (max - min).Magnitude)
+		end
+	end)
 	anchor:Destroy()
 	if slab then
 		slab:Destroy()
 	end
+	if not ok then
+		for _, result in results do
+			result:Destroy()
+		end
+		error(err, 0)
+	end
 
-	local surface = result
-	surface.Name = SURFACE_NAME
-	surface.Anchored = true
-	surface.CanTouch = false
-	surface.UsePartColor = true
-	surface.Material = opened.disp.material
-	surface.Color = opened.disp.color
-	surface.MaterialVariant = opened.disp.materialVariant
-	surface.SmoothingAngle = smoothingAngle
-	surface.Parent = opened.model
+	for index, surface in results do
+		local look = if index == 0 then Displacement.baseLook(disp) else disp.looks[index]
+		surface.Name = if index == 0 then SURFACE_NAME else `{SURFACE_NAME}_{index}`
+		surface.Anchored = true
+		surface.CanTouch = false
+		surface.UsePartColor = true
+		surface.Material = look.material
+		surface.Color = look.color
+		surface.MaterialVariant = look.variant
+		surface.SmoothingAngle = smoothingAngle
+		surface.Parent = opened.model
+	end
 
 	-- Unparented rather than destroyed, so undo can bring the wedges back.
 	for _, part in opened.wedges.parts do

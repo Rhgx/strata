@@ -9,6 +9,7 @@ local Session = require(script.Scene.Session)
 local Settings = require(script.State.Settings)
 local startActivation = require(script.Viewport.Activation)
 local startBrushTool = require(script.Viewport.BrushTool)
+local startMaterialTool = require(script.Viewport.MaterialTool)
 local startSampleTool = require(script.Viewport.SampleTool)
 local startStitchTool = require(script.Viewport.StitchTool)
 local startToolbar = require(script.Viewport.Toolbar)
@@ -91,6 +92,22 @@ local function restoreSettings()
 		if typeof(saved.stitchReach) == "number" then
 			s.stitchReach = saved.stitchReach
 		end
+		local material = if typeof(saved.paintMaterial) == "string" then Enum.Material:FromName(saved.paintMaterial) else nil
+		if material then
+			s.paintMaterial = material
+		end
+		if typeof(saved.paintColor) == "string" then
+			local ok, color = pcall(Color3.fromHex, saved.paintColor)
+			if ok then
+				s.paintColor = color
+			end
+		end
+		if typeof(saved.paintVariant) == "string" then
+			s.paintVariant = saved.paintVariant
+		end
+		if typeof(saved.paintFine) == "boolean" then
+			s.paintFine = saved.paintFine
+		end
 	end)
 end
 
@@ -116,6 +133,10 @@ local function saveSettings()
 		autoBake = s.autoBake,
 		smoothingAngle = s.smoothingAngle,
 		showKeyHints = s.showKeyHints,
+		paintMaterial = s.paintMaterial.Name,
+		paintColor = s.paintColor:ToHex(),
+		paintVariant = s.paintVariant,
+		paintFine = s.paintFine,
 	})
 end
 
@@ -142,6 +163,7 @@ local stopToolbar = startToolbar(plugin, widget)
 local stopSession = Session.start()
 local stopActivation = startActivation(plugin)
 local stopBrushTool = startBrushTool(plugin)
+local stopMaterialTool = startMaterialTool(plugin)
 local stopPickFaceTool = PickFaceTool.start(plugin)
 local stopStitchTool = startStitchTool(plugin)
 local stopSampleTool = startSampleTool(plugin)
@@ -159,6 +181,7 @@ plugin.Unloading:Connect(function()
 	saveSettings()
 	root:unmount()
 	stopBrushTool()
+	stopMaterialTool()
 	stopPickFaceTool()
 	stopStitchTool()
 	stopSampleTool()

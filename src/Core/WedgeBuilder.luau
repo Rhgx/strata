@@ -117,6 +117,21 @@ function WedgeBuilder.updateTriangles(
 	return positions
 end
 
+-- Gives the wedges of `triangles` the look each triangle shows (painted or the tile's own).
+function WedgeBuilder.applyLooks(disp: Displacement.Displacement, wedges: Wedges, triangles: { number })
+	for _, t in triangles do
+		local look = Displacement.lookOf(disp, t)
+		for n = t * 2 - 1, t * 2 do
+			local part = wedges.parts[n]
+			if part then
+				part.Material = look.material
+				part.Color = look.color
+				part.MaterialVariant = look.variant
+			end
+		end
+	end
+end
+
 -- Creates missing wedges, removes extra ones, applies the appearance and places everything.
 function WedgeBuilder.rebuild(disp: Displacement.Displacement, wedges: Wedges, pivot: CFrame)
 	local count = Displacement.triangleCount(disp) * 2
@@ -141,9 +156,6 @@ function WedgeBuilder.rebuild(disp: Displacement.Displacement, wedges: Wedges, p
 			wedges.parts[n] = part
 			table.insert(created, part)
 		end
-		part.Material = disp.material
-		part.Color = disp.color
-		part.MaterialVariant = disp.materialVariant
 		-- Terrain never needs touch events; skipping them saves physics work in game.
 		part.CanTouch = false
 	end
@@ -152,6 +164,7 @@ function WedgeBuilder.rebuild(disp: Displacement.Displacement, wedges: Wedges, p
 	for t = 1, Displacement.triangleCount(disp) do
 		all[t] = t
 	end
+	WedgeBuilder.applyLooks(disp, wedges, all)
 	WedgeBuilder.updateTriangles(disp, wedges, pivot, all)
 
 	-- Parent after placing, so new parts are inserted once at their final position.

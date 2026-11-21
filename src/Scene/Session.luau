@@ -107,6 +107,16 @@ function Session.updateWedges(opened: Opened, changed: { [number]: true }): bool
 	return rebuilt
 end
 
+-- Shows new painted looks on the wedges of `triangles` (bringing wedges back first if the
+-- displacement was baked). Nothing moves, so no vertex math or sewing. Returns whether the
+-- wedges had to be built first.
+function Session.updateLooks(opened: Opened, triangles: { number }): boolean
+	local rebuilt = TerrainInstance.ensureWedges(opened)
+	WedgeBuilder.applyLooks(opened.disp, opened.wedges, triangles)
+	dirty[opened.model] = true
+	return rebuilt
+end
+
 -- Bakes `targets` into unions. Yields; must run inside a ChangeHistoryService recording.
 function Session.bake(targets: { Opened }, smoothingAngle: number): BakeResult
 	local result: BakeResult = { baked = 0, failed = 0, firstError = nil }

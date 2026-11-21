@@ -55,8 +55,7 @@ function Bake.applySmoothing(angle: number): number
 	end
 	Recording.run("Strata smoothing", function()
 		for _, model in Session.models() do
-			local surface = TerrainInstance.surface(model)
-			if surface then
+			for _, surface in TerrainInstance.surfaces(model) do
 				surface.SmoothingAngle = angle
 			end
 		end

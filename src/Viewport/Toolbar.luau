@@ -1,6 +1,6 @@
 --!strict
 --[[
-	The plugin's button group in Studio's Plugins ribbon tab: the panel toggle and the six
+	The plugin's button group in Studio's Plugins ribbon tab: the panel toggle and the seven
 	viewport tools, which light up while running. Each tool also gets a plugin action, so users
 	can bind keys in File > Customize Shortcuts.
 
@@ -24,6 +24,7 @@ local TOOL_ICONS: { [Tool]: string } = {
 	Lower = "Lua/Terrain/%s/Large/Terrain_Erode.png",
 	Smooth = "Lua/Terrain/%s/Large/Terrain_Smooth.png",
 	RaiseTo = "Lua/Terrain/%s/Large/Terrain_Flatten.png",
+	Material = "Lua/Terrain/%s/Large/Terrain_Paint.png",
 	PickFaces = "Lua/TerrainEditor/%s/Large/Select.png",
 	-- The Align tool's icon (parts resting on one line) reads as snapping onto part edges.
 	Stitch = "Shared/WidgetIcons/%s/Large/AlignTool.png",
@@ -33,6 +34,7 @@ local TOOL_TIPS: { [Tool]: string } = {
 	Lower = "Push terrain inward along the paint axis. Hold Ctrl to raise, Shift to smooth.",
 	Smooth = "Even out bumps and blend across tile seams.",
 	RaiseTo = "Flatten terrain to an exact Height from each tile's flat base. Hold Shift to smooth.",
+	Material = "Paint a material and color into parts of a tile, such as a road through grass. Hold Ctrl to erase.",
 	PickFaces = "Click part faces in the 3D view, then click Create to turn them into terrain.",
 	Stitch = "Click a block or wedge part in the 3D view to snap nearby tile edges onto it.",
 }

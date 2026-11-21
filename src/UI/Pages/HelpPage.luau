@@ -25,7 +25,7 @@ type KeyHint = {
 
 local QUICK_START = table.concat({
 	"1. <b>Create</b>: select block or wedge parts and click Create, or use Pick faces.",
-	"2. <b>Sculpt</b>: pick a brush in the strip above and drag on terrain.",
+	"2. <b>Sculpt</b>: pick a brush in the strip above and drag on terrain. The Material tool paints roads and patches.",
 	"3. <b>Edit</b>: select tiles to change detail, round, split, sew or bake.",
 	"4. <b>Stitch</b>: snap terrain edges onto roads, floors or walls.",
 }, "\n")
@@ -38,6 +38,14 @@ local PAINT_KEYS: { KeyHint } = {
 	{ key = "Ctrl + Scroll", action = "Resize brush" },
 	{ key = "Alt + Drag", action = "Resize brush" },
 	{ key = "Alt + Right Click", action = "Pick axis" },
+	{ key = "Esc", action = "Stop tool" },
+}
+
+local MATERIAL_KEYS: { KeyHint } = {
+	{ key = "Left Drag", action = "Paint material" },
+	{ key = "Ctrl", action = "Erase" },
+	{ key = "Alt + Right Click", action = "Pick look" },
+	{ key = "Ctrl + Scroll", action = "Resize brush" },
 	{ key = "Esc", action = "Stop tool" },
 }
 
@@ -104,13 +112,15 @@ local function HelpPage()
 		QuickStart = Rows.paragraph(3, QUICK_START),
 		PaintHeading = Rows.section(4, "Paint shortcuts"),
 		PaintKeys = keyTable(5, PAINT_KEYS),
-		StitchHeading = Rows.section(6, "Stitch shortcuts"),
-		StitchKeys = keyTable(7, STITCH_KEYS),
-		PickHeading = Rows.section(8, "Pick faces shortcuts"),
-		PickKeys = keyTable(9, PICK_KEYS),
-		BracketNote = Rows.paragraph(10, "[ and ] also resize the brush or change reach.", "dimmed"),
-		TipDivider = Rows.divider(11),
-		Tip = Rows.paragraph(12, "Hover any control for details. Ctrl + Z undoes each step. The gear opens Settings.", "dimmed"),
+		MaterialHeading = Rows.section(6, "Material shortcuts"),
+		MaterialKeys = keyTable(7, MATERIAL_KEYS),
+		StitchHeading = Rows.section(8, "Stitch shortcuts"),
+		StitchKeys = keyTable(9, STITCH_KEYS),
+		PickHeading = Rows.section(10, "Pick faces shortcuts"),
+		PickKeys = keyTable(11, PICK_KEYS),
+		BracketNote = Rows.paragraph(12, "[ and ] also resize the brush or change reach.", "dimmed"),
+		TipDivider = Rows.divider(13),
+		Tip = Rows.paragraph(14, "Hover any control for details. Ctrl + Z undoes each step. The gear opens Settings.", "dimmed"),
 	})
 end
 

@@ -69,10 +69,7 @@ function Shape.setDetail(power: number): number
 			if opened.disp.power == power then
 				continue
 			end
-			local surface = TerrainInstance.surface(opened.model)
-			if surface then
-				surface.Parent = nil
-			end
+			TerrainInstance.removeSurfaces(opened.model)
 			before[opened] = opened.disp
 			opened.disp = Displacement.changePower(opened.disp, power)
 			WedgeBuilder.rebuild(opened.disp, opened.wedges, opened.model:GetPivot())

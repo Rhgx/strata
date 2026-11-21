@@ -16,15 +16,19 @@ local Tooltip = require(script.Parent.Tooltip)
 local e = React.createElement
 
 local BUTTON = 26
-local GAP = 3
+-- 7 buttons, 6 gaps and the divider fit the panel's minimum width (220 px, 206 inside).
+local GAP = 2
 -- Space for the divider between the brushes and the click tools.
 local DIVIDER = 9
+-- The brushes before the divider (Raise, Lower, Smooth, Raise To, Material).
+local BRUSHES = 5
 
 local TIPS: { [Settings.Tool]: string } = {
 	Raise = "**Raise**: push terrain outward.\n\n> Hold `Ctrl` to lower, `Shift` to smooth.",
 	Lower = "**Lower**: push terrain inward.\n\n> Hold `Ctrl` to raise, `Shift` to smooth.",
 	Smooth = "**Smooth**: even out bumps.\n\n> Blends across tile seams.",
 	RaiseTo = "**Raise To**: flatten to an exact `Height`.\n\n> Hold `Shift` to smooth.",
+	Material = "**Material**: paint a material into tiles (a road through grass).\n\n> Hold `Ctrl` to erase, `Alt + Right Click` to pick a look.",
 	PickFaces = "**Pick faces**: click part faces in 3D.\n\n> Click `Create` when ready.",
 	Stitch = "**Stitch**: snap tile edges to a part.\n\n> Click a part in 3D to stitch nearby edges.",
 }
@@ -34,6 +38,7 @@ local ICONS: { [Settings.Tool]: Icons.Icon } = {
 	Lower = Icons.Lower,
 	Smooth = Icons.Smooth,
 	RaiseTo = Icons.RaiseTo,
+	Material = Icons.Material,
 	PickFaces = Icons.PickFaces,
 	Stitch = Icons.Stitch,
 }
@@ -46,7 +51,7 @@ local function ToolStrip(props: Props)
 	local theme = StudioComponents.useTheme()
 	local children: { [string]: unknown } = {
 		Divider = e("Frame", {
-			Position = UDim2.fromOffset(4 * (BUTTON + GAP) + (DIVIDER - GAP) // 2 - 1, 5),
+			Position = UDim2.fromOffset(BRUSHES * (BUTTON + GAP) + (DIVIDER - GAP) // 2 - 1, 5),
 			Size = UDim2.new(0, 1, 0, BUTTON - 6),
 			BorderSizePixel = 0,
 			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
@@ -60,7 +65,7 @@ local function ToolStrip(props: Props)
 		}),
 	}
 	for index, tool: Settings.Tool in Settings.tools() do
-		local x = (index - 1) * (BUTTON + GAP) + (if index > 4 then DIVIDER else 0)
+		local x = (index - 1) * (BUTTON + GAP) + (if index > BRUSHES then DIVIDER else 0)
 		children[tool] = e(Tooltip, {
 			Text = TIPS[tool],
 			Position = UDim2.fromOffset(x, 1),

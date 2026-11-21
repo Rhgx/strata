@@ -1,6 +1,6 @@
 --!strict
 --[[
-	The one owner of the plugin's viewport mouse. Painting, picking faces and stitching to parts
+	The one owner of the plugin's viewport mouse. Painting, the Material tool, picking faces and stitching to parts
 	all need plugin:Activate; doing it in one place means switching from one to another never
 	deactivates the mouse in between, and Studio taking the mouse back (for example the user
 	picks the Move tool) stops whichever tool was running.
@@ -27,7 +27,7 @@ return function(plugin: Plugin): () -> ()
 	local releasing = false
 
 	local function sync(state: Settings.State)
-		local wants = state.painting or state.picking or state.stitching or state.sampling
+		local wants = state.painting or state.coloring or state.picking or state.stitching or state.sampling
 		if wants and not active then
 			active = true
 			plugin:Activate(true)
@@ -37,7 +37,7 @@ return function(plugin: Plugin): () -> ()
 			plugin:Deactivate()
 			releasing = false
 		end
-		mouse.Icon = if state.painting then ICONS.paint elseif state.picking or state.stitching or state.sampling then ICONS.pick else ""
+		mouse.Icon = if state.painting or state.coloring then ICONS.paint elseif state.picking or state.stitching or state.sampling then ICONS.pick else ""
 	end
 
 	local unsubscribe = Settings.subscribe(sync)

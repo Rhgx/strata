@@ -24,6 +24,8 @@ export type Snapshot = {
 export type Hit = {
 	snapshot: Snapshot,
 	distance: number,
+	-- The triangle hit (Displacement.triangle numbering).
+	triangle: number,
 	-- The triangle's vertices and the hit's barycentric weights on it.
 	i1: number,
 	i2: number,
@@ -128,6 +130,7 @@ function SurfaceRay.cast(origin: Vector3, direction: Vector3, length: number, sn
 				best = {
 					snapshot = snapshot,
 					distance = distance,
+					triangle = t,
 					i1 = i1,
 					i2 = i2,
 					i3 = i3,

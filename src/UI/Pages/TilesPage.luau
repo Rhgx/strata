@@ -284,8 +284,26 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			end,
 		}),
 
-		ActionsHeading = Rows.section(6, "Actions"),
-		Actions = Rows.grid(7, 2, {
+		-- Only when a selected tile has painted materials.
+		ClearPaint = if info.painted > 0
+			then Rows.button(
+				6,
+				"Clear painted materials",
+				function()
+					run(function()
+						local count = Appearance.clearPaint()
+						Status.post("success", `Cleared painted materials from {Format.plural(count, "tile")}.`)
+					end)
+				end,
+				"**Remove painted materials** from the selected tiles.\n\n"
+					.. "Painted areas go back to each tile's own look.\n\n"
+					.. "> Paint with the `Material` tool in the strip.",
+				nil,
+				Icons.ClearPaint
+			)
+			else nil,
+		ActionsHeading = Rows.section(7, "Actions"),
+		Actions = Rows.grid(8, 2, {
 			Round = actionButton(1, "Round folds", Icons.RoundFolds, info.count < 2, function()
 				run(function()
 					local count = Shape.round()
@@ -334,11 +352,11 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. `Matches block or wedge parts within {settings.stitchReach} st.\n\n`
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
 		}),
-		BakeDivider = Rows.divider(8),
-		Bake = bakeRow(9, info),
+		BakeDivider = Rows.divider(9),
+		Bake = bakeRow(10, info),
 
 		Noise = Rows.collapsible(
-			10,
+			11,
 			"noise",
 			"Noise",
 			"**Add random bumps** to selected tiles.\n\n"

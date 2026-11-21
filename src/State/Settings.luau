@@ -13,13 +13,24 @@ export type FaceMode = PartFaces.Mode
 export type Falloff = Paint.Falloff
 export type Axis = Paint.Axis
 -- The viewport tools, in ribbon and tool strip order.
-export type Tool = "Raise" | "Lower" | "Smooth" | "RaiseTo" | "PickFaces" | "Stitch"
+export type Tool = "Raise" | "Lower" | "Smooth" | "RaiseTo" | "Material" | "PickFaces" | "Stitch"
 -- A page shown over the panel instead of the current context.
 export type Overlay = "none" | "settings" | "help"
 
 export type State = {
-	-- The viewport tools share the mouse, so at most one of painting, picking and stitching is on.
+	-- The viewport tools share the mouse, so at most one of painting, coloring, picking and
+	-- stitching is on.
 	painting: boolean,
+	-- The Material tool: paints looks into tiles.
+	coloring: boolean,
+	-- Material tool: the next click picks up a look instead of painting (the panel's pipette).
+	pickingLook: boolean,
+	-- The look the Material tool paints.
+	paintMaterial: Enum.Material,
+	paintColor: Color3,
+	paintVariant: string,
+	-- Material tool: paint single triangles instead of whole grid cells.
+	paintFine: boolean,
 	-- Pick faces mode.
 	picking: boolean,
 	-- Stitch to part mode.
@@ -88,12 +99,13 @@ local MODE_LABELS: { [BrushMode]: string } = {
 	Smooth = "Smooth",
 	RaiseTo = "Raise To",
 }
-local TOOLS: { Tool } = { "Raise", "Lower", "Smooth", "RaiseTo", "PickFaces", "Stitch" }
+local TOOLS: { Tool } = { "Raise", "Lower", "Smooth", "RaiseTo", "Material", "PickFaces", "Stitch" }
 local TOOL_LABELS: { [Tool]: string } = {
 	Raise = "Raise",
 	Lower = "Lower",
 	Smooth = "Smooth",
 	RaiseTo = "Raise To",
+	Material = "Material",
 	PickFaces = "Pick faces",
 	Stitch = "Stitch",
 }
@@ -135,6 +147,13 @@ end
 
 local state: State = table.freeze({
 	painting = false,
+	coloring = false,
+	pickingLook = false,
+	-- A road look, since painting paths into grass is the common case.
+	paintMaterial = Enum.Material.Asphalt,
+	paintColor = Color3.fromRGB(90, 90, 95),
+	paintVariant = "",
+	paintFine = false,
 	picking = false,
 	stitching = false,
 	sampling = false,
@@ -181,22 +200,22 @@ function Settings.update(change: (State) -> ())
 	nextState.noiseMax = math.clamp(nextState.noiseMax, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.stitchReach = math.clamp(nextState.stitchReach, Settings.STITCH_REACH_MIN, Settings.STITCH_REACH_MAX)
 	-- The viewport tools share the mouse: turning one on turns the others off.
-	if nextState.painting and not state.painting then
-		nextState.picking = false
-		nextState.stitching = false
-		nextState.sampling = false
-	elseif nextState.picking and not state.picking then
-		nextState.painting = false
-		nextState.stitching = false
-		nextState.sampling = false
-	elseif nextState.stitching and not state.stitching then
-		nextState.painting = false
-		nextState.picking = false
-		nextState.sampling = false
-	elseif nextState.sampling and not state.sampling then
-		nextState.painting = false
-		nextState.picking = false
-		nextState.stitching = false
+	local turnedOn = if nextState.painting and not state.painting
+		then "painting"
+		elseif nextState.coloring and not state.coloring then "coloring"
+		elseif nextState.picking and not state.picking then "picking"
+		elseif nextState.stitching and not state.stitching then "stitching"
+		elseif nextState.sampling and not state.sampling then "sampling"
+		else nil
+	if turnedOn then
+		nextState.painting = turnedOn == "painting"
+		nextState.coloring = turnedOn == "coloring"
+		nextState.picking = turnedOn == "picking"
+		nextState.stitching = turnedOn == "stitching"
+		nextState.sampling = turnedOn == "sampling"
+	end
+	if not nextState.coloring then
+		nextState.pickingLook = false
 	end
 	state = table.freeze(nextState)
 	for listener in listeners do
@@ -216,6 +235,8 @@ end
 function Settings.activeTool(s: State): Tool?
 	if s.painting then
 		return s.mode
+	elseif s.coloring then
+		return "Material"
 	elseif s.picking then
 		return "PickFaces"
 	elseif s.stitching then
@@ -230,12 +251,15 @@ function Settings.toggleTool(tool: Tool)
 	Settings.update(function(s)
 		if Settings.activeTool(s) == tool then
 			s.painting = false
+			s.coloring = false
 			s.picking = false
 			s.stitching = false
 			return
 		end
 		s.overlay = "none"
-		if tool == "PickFaces" then
+		if tool == "Material" then
+			s.coloring = true
+		elseif tool == "PickFaces" then
 			s.picking = true
 		elseif tool == "Stitch" then
 			s.stitching = true
@@ -246,11 +270,12 @@ function Settings.toggleTool(tool: Tool)
 	end)
 end
 
--- Stops whichever viewport tool is running (painting, picking, stitching or sampling).
+-- Stops whichever viewport tool is running (painting, coloring, picking, stitching or sampling).
 function Settings.stopViewportTool()
-	if state.painting or state.picking or state.stitching or state.sampling then
+	if state.painting or state.coloring or state.picking or state.stitching or state.sampling then
 		Settings.update(function(s)
 			s.painting = false
+			s.coloring = false
 			s.picking = false
 			s.stitching = false
 			s.sampling = false

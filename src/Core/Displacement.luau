@@ -15,13 +15,27 @@
 	All positions are local to the owning model's pivot, so moving the model in Studio does not
 	invalidate the data.
 
+	Painted materials (a Strata addition, see the Material tool) are stored per triangle: each
+	triangle shows look 0 (the tile's own material, color and variant) or one of the painted looks
+	in `looks`. Hammer instead blends two textures by a per-vertex alpha; Roblox parts cannot blend
+	textures, and a triangle is the smallest piece a tile can show, so `alphas` stays unused.
+
 	Corner order follows Source's surface points: rows walk from corners[1] to corners[2] (and
 	from corners[4] to corners[3] on the opposite edge); within a row, columns walk from the
 	corners[1]/corners[2] edge to the corners[4]/corners[3] edge. Vertex indices are 1-based and
 	row-major: index = row * size + col + 1.
 ]]
 
+local HttpService = game:GetService("HttpService")
+
 local Displacement = {}
+
+-- A material, color and material variant (empty for the base material).
+export type Look = {
+	material: Enum.Material,
+	color: Color3,
+	variant: string,
+}
 
 export type Displacement = {
 	power: number,
@@ -41,7 +55,15 @@ export type Displacement = {
 	color: Color3,
 	-- A MaterialVariant name from MaterialService (custom materials), or empty for the base material.
 	materialVariant: string,
+	-- Painted looks; triangle look k (1 or more) is looks[k].
+	looks: { Look },
+	-- Per triangle: 0 for the tile's own look, otherwise an index into `looks`.
+	triLooks: { number },
 }
+
+-- How many painted looks one tile can hold (one character each in the saved data).
+Displacement.MAX_LOOKS = 35
+local LOOK_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 -- Bump when saved data changes in a way old loaders cannot read (none yet: pre-release data is
 -- converted by hand instead of kept loadable).
@@ -89,6 +111,8 @@ function Displacement.new(corners: { Vector3 }, power: number, material: Enum.Ma
 		material = material,
 		color = color,
 		materialVariant = "",
+		looks = {},
+		triLooks = table.create((size - 1) * (size - 1) * 2, 0),
 	}
 end
 
@@ -247,6 +271,111 @@ function Displacement.trianglesTouching(disp: Displacement, vertices: { [number]
 	return result
 end
 
+--[[
+	The triangle covering a point given in grid units: `row` from 0 to size - 1 along the rows
+	(corner 1 to corner 2) and `col` likewise along the columns. Follows the checkerboard split
+	of Displacement.triangle.
+]]
+function Displacement.triangleAt(disp: Displacement, row: number, col: number): number
+	local quadsPerSide = disp.size - 1
+	local r = math.clamp(math.floor(row), 0, quadsPerSide - 1)
+	local c = math.clamp(math.floor(col), 0, quadsPerSide - 1)
+	local fr, fc = row - r, col - c
+	local q = r * quadsPerSide + c
+	local second
+	if (r + c) % 2 == 0 then
+		-- Split 00-11: the first triangle (00, 10, 11) is the side nearer the next row.
+		second = fc > fr
+	else
+		-- Split 01-10: the first triangle (00, 10, 01) is the side nearer vertex 00.
+		second = fr + fc > 1
+	end
+	return q * 2 + (if second then 2 else 1)
+end
+
+-- Painted materials ------------------------------------------------------------------------------
+
+-- Colors compared at 8 bits per channel, the precision Studio shows and saves.
+local function sameColor(a: Color3, b: Color3): boolean
+	return math.round(a.R * 255) == math.round(b.R * 255)
+		and math.round(a.G * 255) == math.round(b.G * 255)
+		and math.round(a.B * 255) == math.round(b.B * 255)
+end
+
+function Displacement.sameLook(a: Look, b: Look): boolean
+	return a.material == b.material and a.variant == b.variant and sameColor(a.color, b.color)
+end
+
+-- The tile's own look (look 0).
+function Displacement.baseLook(disp: Displacement): Look
+	return { material = disp.material, color = disp.color, variant = disp.materialVariant }
+end
+
+-- The look triangle `t` shows.
+function Displacement.lookOf(disp: Displacement, t: number): Look
+	local index = disp.triLooks[t]
+	if index and index > 0 then
+		return disp.looks[index]
+	end
+	return Displacement.baseLook(disp)
+end
+
+-- The index `look` has on this tile (0 for the tile's own look), adding it when it is new.
+-- Nil when the tile already holds MAX_LOOKS painted looks.
+function Displacement.lookIndex(disp: Displacement, look: Look): number?
+	if Displacement.sameLook(look, Displacement.baseLook(disp)) then
+		return 0
+	end
+	for index, existing in disp.looks do
+		if Displacement.sameLook(existing, look) then
+			return index
+		end
+	end
+	if #disp.looks >= Displacement.MAX_LOOKS then
+		return nil
+	end
+	table.insert(disp.looks, { material = look.material, color = look.color, variant = look.variant })
+	return #disp.looks
+end
+
+function Displacement.isPainted(disp: Displacement): boolean
+	for _, index in disp.triLooks do
+		if index ~= 0 then
+			return true
+		end
+	end
+	return false
+end
+
+-- How many different looks the tile shows (its own look counts once if any triangle uses it).
+function Displacement.lookCount(disp: Displacement): number
+	local used: { [number]: true } = {}
+	local count = 0
+	for _, index in disp.triLooks do
+		if not used[index] then
+			used[index] = true
+			count += 1
+		end
+	end
+	return count
+end
+
+-- Drops painted looks no triangle uses and renumbers the rest in order of first use.
+function Displacement.compactLooks(disp: Displacement)
+	local remap: { [number]: number } = { [0] = 0 }
+	local looks: { Look } = {}
+	for t, index in disp.triLooks do
+		local mapped = remap[index]
+		if not mapped then
+			table.insert(looks, disp.looks[index])
+			mapped = #looks
+			remap[index] = mapped
+		end
+		disp.triLooks[t] = mapped
+	end
+	disp.looks = looks
+end
+
 -- Edges, corners and resampling --------------------------------------------------------------
 
 export type Edge = {
@@ -380,7 +509,27 @@ local function withPower(disp: Displacement, power: number): Displacement
 		material = disp.material,
 		color = disp.color,
 		materialVariant = disp.materialVariant,
+		looks = table.clone(disp.looks),
+		triLooks = disp.triLooks,
 	}
+end
+
+-- Painted looks for `result` (a different power): each new triangle takes the look of the old
+-- triangle under its center, at the same spot on the flat face.
+local function resampleLooks(old: Displacement, result: Displacement): { number }
+	local count = Displacement.triangleCount(result)
+	if not Displacement.isPainted(old) then
+		return table.create(count, 0)
+	end
+	local scale = (old.size - 1) / (result.size - 1)
+	local looks = table.create(count, 0)
+	for t = 1, count do
+		local i1, i2, i3 = Displacement.triangle(result, t)
+		local row = ((i1 - 1) // result.size + (i2 - 1) // result.size + (i3 - 1) // result.size) / 3
+		local col = ((i1 - 1) % result.size + (i2 - 1) % result.size + (i3 - 1) % result.size) / 3
+		looks[t] = old.triLooks[Displacement.triangleAt(old, row * scale, col * scale)]
+	end
+	return looks
 end
 
 local function powerUp(disp: Displacement): Displacement
@@ -391,6 +540,7 @@ local function powerUp(disp: Displacement): Displacement
 	result.offsets = upsample(disp.offsets, size, averageVectors)
 	result.offsetNormals = upsample(disp.offsetNormals, size, averageVectors)
 	result.alphas = upsample(disp.alphas, size, averageNumbers)
+	result.triLooks = resampleLooks(disp, result)
 	return result
 end
 
@@ -404,6 +554,7 @@ local function powerDown(disp: Displacement): Displacement
 	result.offsets = downsample(disp.offsets, size, addVectors, scaleVector)
 	result.offsetNormals = downsample(disp.offsetNormals, size, addVectors, scaleVector)
 	result.alphas = downsample(disp.alphas, size, addNumbers, scaleNumber)
+	result.triLooks = resampleLooks(disp, result)
 	return result
 end
 
@@ -475,6 +626,18 @@ function Displacement.split(disp: Displacement): { Quarter }
 					child.alphas[target] = disp.alphas[source]
 				end
 			end
+			-- Each quarter quad lines up with one parent quad (same checkerboard split), so
+			-- painted looks copy triangle for triangle.
+			child.looks = table.clone(disp.looks)
+			for r = 0, half - 1 do
+				for col = 0, half - 1 do
+					local parentQuad = (qi * half + r) * (disp.size - 1) + (qj * half + col)
+					local childQuad = r * half + col
+					child.triLooks[childQuad * 2 + 1] = disp.triLooks[parentQuad * 2 + 1]
+					child.triLooks[childQuad * 2 + 2] = disp.triLooks[parentQuad * 2 + 2]
+				end
+			end
+			Displacement.compactLooks(child)
 			table.insert(quarters, { disp = child, center = center, row = qi + 1, col = qj + 1 })
 		end
 	end
@@ -598,6 +761,74 @@ local function saveVectors(config: Configuration, name: string, values: { Vector
 	config:SetAttribute(name, if allVectors(values, default) then nil else encodeVectors(values))
 end
 
+--[[
+	Painted looks: "Looks" holds the palette as JSON (material name, hex color, variant) and
+	"TriLooks" one character per triangle (0 for the tile's own look, then 1 to 9 and a to z).
+	Both are left out on unpainted tiles. Unused looks are dropped first, so painted unions,
+	named after their look number when baked, always match the saved palette.
+]]
+local function saveLooks(disp: Displacement, config: Configuration)
+	Displacement.compactLooks(disp)
+	if #disp.looks == 0 then
+		config:SetAttribute("Looks", nil)
+		config:SetAttribute("TriLooks", nil)
+		return
+	end
+	local palette = table.create(#disp.looks)
+	for i, look in disp.looks do
+		palette[i] = { m = look.material.Name, c = look.color:ToHex(), v = look.variant }
+	end
+	local digits = table.create(#disp.triLooks)
+	for t, index in disp.triLooks do
+		digits[t] = string.sub(LOOK_DIGITS, index + 1, index + 1)
+	end
+	config:SetAttribute("Looks", HttpService:JSONEncode(palette))
+	config:SetAttribute("TriLooks", table.concat(digits))
+end
+
+local function loadLooks(config: Configuration, triangleCount: number): ({ Look }, { number })
+	local paletteText = config:GetAttribute("Looks")
+	local digitsText = config:GetAttribute("TriLooks")
+	if paletteText == nil and digitsText == nil then
+		return {}, table.create(triangleCount, 0)
+	end
+	if typeof(paletteText) ~= "string" or typeof(digitsText) ~= "string" then
+		error(`DispData needs both "Looks" and "TriLooks" as strings, or neither`)
+	end
+	local decoded: unknown = HttpService:JSONDecode(paletteText)
+	if typeof(decoded) ~= "table" then
+		error(`DispData.Looks is not a list`)
+	end
+	local looks: { Look } = {}
+	for i, entry: unknown in decoded :: { unknown } do
+		if typeof(entry) ~= "table" then
+			error(`DispData.Looks entry {i} is not an object`)
+		end
+		local fields = entry :: { [string]: unknown }
+		local name, hex, variant = fields.m, fields.c, fields.v
+		if typeof(name) ~= "string" or typeof(hex) ~= "string" or typeof(variant) ~= "string" then
+			error(`DispData.Looks entry {i} needs string fields m, c and v`)
+		end
+		local ok, color = pcall(Color3.fromHex, hex)
+		if not ok then
+			error(`DispData.Looks entry {i} has an invalid color "{hex}"`)
+		end
+		looks[i] = { material = materialFromName(name), color = color, variant = variant }
+	end
+	if #digitsText ~= triangleCount then
+		error(`DispData.TriLooks: expected {triangleCount} characters, got {#digitsText}`)
+	end
+	local triLooks = table.create(triangleCount)
+	for t = 1, triangleCount do
+		local index = (string.find(LOOK_DIGITS, string.sub(digitsText, t, t), 1, true) or 0) - 1
+		if index < 0 or index > #looks then
+			error(`DispData.TriLooks: character {t} names a look that does not exist`)
+		end
+		triLooks[t] = index
+	end
+	return looks, triLooks
+end
+
 function Displacement.save(disp: Displacement, config: Configuration)
 	config:SetAttribute("Version", FORMAT_VERSION)
 	config:SetAttribute("Power", disp.power)
@@ -614,6 +845,7 @@ function Displacement.save(disp: Displacement, config: Configuration)
 	saveVectors(config, "OffsetNormals", disp.offsetNormals, computeFaceNormal(disp.corners))
 	saveNumbers(config, "Alphas", disp.alphas, 0)
 	config:SetAttribute("Subdiv", disp.subdiv)
+	saveLooks(disp, config)
 end
 
 function Displacement.load(config: Configuration): Displacement
@@ -653,6 +885,7 @@ function Displacement.load(config: Configuration): Displacement
 	if typeof(subdiv) ~= "boolean" then
 		error(`DispData is missing boolean attribute "Subdiv"`)
 	end
+	local looks, triLooks = loadLooks(config, (size - 1) * (size - 1) * 2)
 
 	return {
 		power = power,
@@ -669,6 +902,8 @@ function Displacement.load(config: Configuration): Displacement
 		color = readColor3(config, "Color"),
 		-- Left out for the base material.
 		materialVariant = if typeof(variant) == "string" then variant else "",
+		looks = looks,
+		triLooks = triLooks,
 	}
 end
 
