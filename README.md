@@ -1,8 +1,6 @@
-<img src="assets/logo/strata-store.png" alt="Strata logo" width="128">
+<h1><img src="assets/logo/strata-store.png" alt="" width="40" align="absmiddle"> Strata</h1>
 
-# Strata
-
-Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement terrain built from `WedgePart` geometry. Each tile stores its editable displacement data in a `DispData` `Configuration` and bakes its wedges into a single `UnionOperation` for seamless material projection, so terrain models can be published like any normal Roblox model and reopened for editing later. This repository is private.
+Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement terrain built from `WedgePart` geometry. Each tile stores its editable displacement data in a `DispData` `Configuration` and bakes its wedges into a `UnionOperation` (one per painted look) for seamless material projection, so terrain models can be published like any normal Roblox model and reopened for editing later. This repository is private.
 
 ## Features
 
