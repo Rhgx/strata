@@ -57,7 +57,7 @@ jobs:
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "Releasing Strata $version (prerelease: $prerelease)"
+          echo "Releasing Strata $version (semver prerelease: $prerelease)"
 
       # Pinned binaries from aftman.toml; gh authenticates with GITHUB_TOKEN.
       - name: Install Rojo and Wally
@@ -107,6 +107,8 @@ jobs:
             gh release upload "$TAG" Strata.rbxm SHA256SUMS.txt --clobber
           else
             args=(--verify-tag --title "Strata v$VERSION" --generate-notes --notes "$NOTES")
-            if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
+            # Only mark prereleases once a stable release exists, so betas stay "Latest" until 1.0.0.
+            stable=$(gh api --paginate "repos/$GH_REPO/releases" --jq '.[] | select(.draft | not) | .tag_name | select(split("+")[0] | contains("-") | not)')
+            if [[ "$PRERELEASE" == "true" && -n "$stable" ]]; then args+=(--prerelease); fi
             gh release create "$TAG" Strata.rbxm SHA256SUMS.txt "${args[@]}"
           fi
