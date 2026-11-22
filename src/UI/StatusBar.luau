@@ -1,19 +1,24 @@
 --!strict
 --[[
-	The pinned bottom line of the panel: the latest operation result (from State/Status), or a
-	short message for the current page when there is none. The full text is in a tooltip, since
-	the line truncates in a narrow panel. On the right, the Settings gear and the ? help button.
+	Bottom status bar pinned to the panel: shows the latest operation result from State/Status
+	(or an idle hint for the active page) with full text in a hover tooltip, plus Settings and
+	Help overlay buttons on the right.
 ]]
 
-local Packages = script.Parent.Parent.Parent.Packages
+local UI = script.Parent
+local Plugin = UI.Parent
+local State = Plugin.State
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.State.Settings)
-local Status = require(script.Parent.Parent.State.Status)
-local Accent = require(script.Parent.Accent)
-local Icons = require(script.Parent.Icons)
-local Tooltip = require(script.Parent.Tooltip)
+local Status = require(State.Status)
+local Settings = require(State.Settings)
+
+local Icons = require(UI.Icons)
+local Accent = require(UI.Accent)
+local Tooltip = require(UI.Tooltip)
 
 local e = React.createElement
 
@@ -21,7 +26,7 @@ local HEIGHT = 24
 local BUTTON_SIZE = 22
 local BUTTON_GAP = 4
 
--- Success is green (Accent.success): Studio's theme has no success color.
+-- Success messages override TextColor3 with Accent.success since Studio themes lack a success role.
 local KIND_COLORS: { [Status.Kind]: Enum.StudioStyleGuideColor } = {
 	success = Enum.StudioStyleGuideColor.MainText,
 	warning = Enum.StudioStyleGuideColor.WarningText,
@@ -29,24 +34,34 @@ local KIND_COLORS: { [Status.Kind]: Enum.StudioStyleGuideColor } = {
 	progress = Enum.StudioStyleGuideColor.MainText,
 }
 
-local function useStatus(): Status.Message?
-	local message, setMessage = React.useState(Status.get())
-	React.useEffect(function()
-		return Status.subscribe(function(next: Status.Message?)
-			setMessage(next)
-		end)
-	end, {})
-	return message
-end
-
 type Props = {
 	idle: string,
 	overlay: Settings.Overlay,
 }
 
--- A square icon button at `slot` from the right edge (0 is the rightmost).
-local function overlayButton(slot: number, icon: Icons.Icon, overlay: Settings.Overlay, current: Settings.Overlay, openTip: string, closeTip: string)
+local function useStatus(): Status.Message?
+	local message, setMessage = React.useState(Status.get())
+
+	React.useEffect(function ()
+		return Status.subscribe(function (next: Status.Message?)
+			setMessage(next)
+		end)
+	end, {})
+
+	return message
+end
+
+-- Renders a square overlay toggle button at `slot` positions from the right edge (0 = rightmost).
+local function overlayButton(
+	slot: number,
+	icon: Icons.Icon,
+	overlay: Settings.Overlay,
+	current: Settings.Overlay,
+	openTip: string,
+	closeTip: string
+)
 	local open = current == overlay
+
 	return e(
 		Tooltip,
 		{
@@ -59,7 +74,8 @@ local function overlayButton(slot: number, icon: Icons.Icon, overlay: Settings.O
 			Size = UDim2.fromScale(1, 1),
 			Icon = icon,
 			Selected = open,
-			OnActivated = function()
+
+			OnActivated = function ()
 				Settings.setOverlay(if open then "none" else overlay)
 			end,
 		})
@@ -83,8 +99,8 @@ local function StatusBar(props: Props)
 			BorderSizePixel = 0,
 			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
 		}),
-		-- The tooltip takes a single element child (a frame); React-Lua cannot render a nested
-		-- keyed table there.
+
+		-- Wrap label and dismiss hit target in a single Frame because Tooltip requires one child element.
 		Message = e(
 			Tooltip,
 			{
@@ -104,19 +120,22 @@ local function StatusBar(props: Props)
 					TextColorStyle = color,
 					TextColor3 = if message and message.kind == "success" then Accent.success(theme) else nil,
 				}),
-				-- Clicking a result dismisses it (errors otherwise stay until the next action).
+
+				-- Clicking a posted message dismisses it early (errors otherwise persist until replaced).
 				Dismiss = if message
 					then e("TextButton", {
 						Size = UDim2.fromScale(1, 1),
 						BackgroundTransparency = 1,
 						Text = "",
-						[React.Event.Activated] = function()
+
+						[React.Event.Activated] = function ()
 							Status.clear()
 						end,
 					})
 					else nil,
 			})
 		),
+
 		Settings = overlayButton(1, Icons.Settings, "settings", props.overlay, "**Settings**", "**Close settings** (`Esc`)."),
 		Help = overlayButton(0, Icons.Help, "help", props.overlay, "**Help** and shortcuts", "**Close help** (`Esc`)."),
 	})

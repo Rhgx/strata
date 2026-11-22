@@ -1,25 +1,37 @@
 --!strict
--- Options of the running Mesh tool: Simplify (mark points, preview, apply) or Cut holes. The marks
--- block (result, Apply, Clear) only shows while points are marked.
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+--[[
+	Options page for the active Mesh tool: Simplify mode (mark points, preview triangle count,
+	apply or clear) and Cut holes mode. The staged commit block appears only while points are
+	marked.
+]]
+
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local State = Plugin.State
+local Scene = Plugin.Scene
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
-local Status = require(script.Parent.Parent.Parent.State.Status)
-local Session = require(script.Parent.Parent.Parent.Scene.Session)
-local Query = require(script.Parent.Parent.Parent.Scene.Query)
-local MeshStage = require(script.Parent.Parent.Parent.Scene.MeshStage)
-local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
-local Format = require(script.Parent.Parent.Parent.State.Format)
+local Format = require(State.Format)
+local Status = require(State.Status)
+local Settings = require(State.Settings)
 
-local Icons = require(script.Parent.Parent.Icons)
-local Rows = require(script.Parent.Parent.Rows)
+local Query = require(Scene.Query)
+local Session = require(Scene.Session)
+local MeshStage = require(Scene.MeshStage)
+
+local MeshActions = require(Plugin.Actions.Mesh)
+
+local RadiusPreview = require(Plugin.Viewport.RadiusPreview)
+
+local Rows = require(UI.Rows)
+local Icons = require(UI.Icons)
 
 local e = React.createElement
 
--- Simplify or Cut holes, as two buttons so the mode is always visible.
+-- Two-button Simplify / Cut holes mode toggle so the active mode is always visible.
 local function modeRow(layoutOrder: number, settings: Settings.State)
 	local function button(order: number, text: string, icon: Icons.Icon, mode: Settings.MeshMode, tooltip: string)
 		return Rows.withTooltip(
@@ -29,8 +41,9 @@ local function modeRow(layoutOrder: number, settings: Settings.State)
 				Text = text,
 				Icon = icon,
 				Selected = settings.meshMode == mode,
-				OnActivated = function()
-					Settings.update(function(s)
+
+				OnActivated = function ()
+					Settings.update(function (s)
 						s.meshMode = mode
 					end)
 				end,
@@ -38,6 +51,7 @@ local function modeRow(layoutOrder: number, settings: Settings.State)
 			order
 		)
 	end
+
 	return Rows.grid(layoutOrder, 2, {
 		Simplify = button(
 			1,
@@ -48,6 +62,7 @@ local function modeRow(layoutOrder: number, settings: Settings.State)
 				.. "The area around removed points fills in with larger triangles.\n\n"
 				.. "> Hold `Ctrl` to mark removed points to come back. Corners always stay."
 		),
+
 		Holes = button(
 			2,
 			"Cut holes",
@@ -62,6 +77,7 @@ end
 
 local function run(action: () -> ())
 	local ok, err: unknown = pcall(action)
+
 	if not ok then
 		Status.post("error", tostring(err))
 	end
@@ -73,23 +89,27 @@ local function MeshPage(props: { settings: Settings.State })
 	local selected = #Query.selectedModels()
 	local hasTiles = #Session.models() > 0
 
-	-- Re-render when points are marked or cleared in the 3D view.
+	-- Re-render when staged marks change from viewport interactions.
 	local _, setStageVersion = React.useState(MeshStage.version())
-	React.useEffect(function()
-		return MeshStage.subscribe(function()
+	local busy, setBusy = React.useState(false)
+	-- Guard async Select flat completion in case the page unmounts while yielding.
+	local mounted = React.useRef(true)
+
+	React.useEffect(function ()
+		return MeshStage.subscribe(function ()
 			setStageVersion(MeshStage.version())
 		end)
 	end, {})
-	local marked = not MeshStage.isEmpty()
-	local busy, setBusy = React.useState(false)
-	-- Select flat finishes after a yield, possibly after the page is gone.
-	local mounted = React.useRef(true)
-	React.useEffect(function()
+
+	React.useEffect(function ()
 		mounted.current = true
-		return function()
+
+		return function ()
 			mounted.current = false
 		end
 	end, {})
+
+	local marked = not MeshStage.isEmpty()
 
 	local children: { [string]: unknown } = {
 		Title = Rows.title(
@@ -99,7 +119,9 @@ local function MeshPage(props: { settings: Settings.State })
 			"**Stop the Mesh tool** (`Esc`).\n\n"
 				.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on."
 		),
+
 		Mode = modeRow(2, settings),
+
 		Radius = Rows.property(
 			5,
 			"Radius",
@@ -109,8 +131,9 @@ local function MeshPage(props: { settings: Settings.State })
 				Max = Settings.RADIUS_MAX,
 				Step = 0.5,
 				Slider = true,
-				OnValidChanged = function(value: number)
-					Settings.update(function(s)
+
+				OnValidChanged = function (value: number)
+					Settings.update(function (s)
 						s.radius = value
 					end)
 					RadiusPreview.pulse()
@@ -122,25 +145,27 @@ local function MeshPage(props: { settings: Settings.State })
 					else "Drag to mark points; a click without dragging marks just the nearest point.")
 				.. "\n\n> Resize in 3D: `Ctrl + Scroll` or `[` and `]`."
 		),
+
 		Fine = if holes
 			then Rows.checkbox(
 				6,
 				"Fine (triangles)",
 				settings.paintFine,
-				function()
-					Settings.update(function(s)
+				function ()
+					Settings.update(function (s)
 						s.paintFine = not s.paintFine
 					end)
 				end,
 				"**Cut single triangles** instead of whole grid cells."
 			)
 			else nil,
+
 		SelectedOnly = Rows.checkbox(
 			7,
 			"Selected only",
 			settings.paintSelectedOnly,
-			function()
-				Settings.update(function(s)
+			function ()
+				Settings.update(function (s)
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
@@ -149,12 +174,13 @@ local function MeshPage(props: { settings: Settings.State })
 	}
 
 	if not holes then
-		-- Select flat and Restore all work on the selection, or every tile when none is selected.
+		-- Select flat and Restore all target selected tiles, or all tiles when nothing is selected.
 		local scopeText = if selected > 0
 			then `the {Format.plural(selected, "selected tile")}`
 			elseif settings.paintSelectedOnly then "the selected tiles"
 			else "every tile"
 		local noScope = not hasTiles or (selected == 0 and settings.paintSelectedOnly)
+
 		children.Auto = Rows.collapsible(
 			10,
 			"auto-simplify",
@@ -170,8 +196,9 @@ local function MeshPage(props: { settings: Settings.State })
 						Max = Settings.SIMPLIFY_ANGLE_MAX,
 						Step = 1,
 						Slider = true,
-						OnValidChanged = function(value: number)
-							Settings.update(function(s)
+
+						OnValidChanged = function (value: number)
+							Settings.update(function (s)
 								s.simplifyAngle = value
 							end)
 						end,
@@ -181,6 +208,7 @@ local function MeshPage(props: { settings: Settings.State })
 						.. "- **5 to 15**: gentle slopes simplify too.\n\n"
 						.. "> Painted borders and hole outlines keep their points."
 				),
+
 				Buttons = Rows.grid(2, 2, {
 					Flat = Rows.withTooltip(
 						`**Mark flat points** on {scopeText} within \`Max angle\`.\n\nCheck the preview, then \`Apply\`.`,
@@ -189,12 +217,15 @@ local function MeshPage(props: { settings: Settings.State })
 							Text = if busy then "Working..." else "Select flat",
 							Icon = Icons.AutoSimplify,
 							Disabled = noScope or busy,
-							OnActivated = function()
-								-- Marking yields between batches, so it runs outside the click handler.
+
+							OnActivated = function ()
+								-- Spawn because selectFlat yields periodically between candidate batches.
 								setBusy(true)
-								task.spawn(function()
-									run(function()
+
+								task.spawn(function ()
+									run(function ()
 										local tiles, points, stopped = MeshActions.selectFlat(settings.simplifyAngle)
+
 										if not mounted.current or stopped then
 											return
 										elseif points == 0 then
@@ -206,6 +237,7 @@ local function MeshPage(props: { settings: Settings.State })
 											)
 										end
 									end)
+
 									if mounted.current then
 										setBusy(false)
 									end
@@ -214,6 +246,7 @@ local function MeshPage(props: { settings: Settings.State })
 						}),
 						1
 					),
+
 					Restore = Rows.withTooltip(
 						`**Mark every removed point** on {scopeText} to come back.\n\nCheck the preview, then \`Apply\`.`,
 						e(StudioComponents.Button, {
@@ -221,7 +254,8 @@ local function MeshPage(props: { settings: Settings.State })
 							Text = "Restore all",
 							Icon = Icons.RestorePoints,
 							Disabled = noScope,
-							OnActivated = function()
+
+							OnActivated = function ()
 								if MeshActions.markRestoreAll() == 0 then
 									Status.post("warning", "No removed points to restore.")
 								end
@@ -233,10 +267,12 @@ local function MeshPage(props: { settings: Settings.State })
 			}
 		)
 
-		-- Below Auto-simplify, so Select flat never moves under the cursor when marks appear.
+		-- Placed below Auto-simplify so Select flat does not shift under the pointer when marks appear.
 		if marked then
 			local before, after = MeshStage.counts()
+
 			children.PendingDivider = Rows.divider(12)
+
 			children.Result = Rows.value(
 				13,
 				"Result",
@@ -245,6 +281,7 @@ local function MeshPage(props: { settings: Settings.State })
 				"**Triangles now and after Apply**, over every tile with marked points.\n\n"
 					.. "The orange lines in 3D are the edges those tiles would gain."
 			)
+
 			children.Commit = Rows.grid(14, 2, {
 				Apply = Rows.withTooltip(
 					"**Apply the marked points** as one undo step.\n\n> Also `Enter` or `X` in 3D.",
@@ -252,9 +289,11 @@ local function MeshPage(props: { settings: Settings.State })
 						Size = UDim2.fromScale(1, 1),
 						Text = "Apply",
 						Icon = Icons.ApplyMarks,
-						OnActivated = function()
-							run(function()
+
+						OnActivated = function ()
+							run(function ()
 								local tiles, points = MeshActions.applyMarks()
+
 								if points > 0 then
 									Status.post("success", `Changed {Format.plural(points, "point")} on {Format.plural(tiles, "tile")}.`)
 								end
@@ -263,6 +302,7 @@ local function MeshPage(props: { settings: Settings.State })
 					}),
 					1
 				),
+
 				Clear = Rows.withTooltip(
 					"**Drop the marks** without changing anything.\n\n> Also `Esc` in 3D.",
 					e(StudioComponents.Button, {
@@ -277,7 +317,7 @@ local function MeshPage(props: { settings: Settings.State })
 		end
 	end
 
-	-- Say so when a drag would do nothing, instead of failing silently.
+	-- Warn explicitly when dragging would have no targets instead of doing nothing silently.
 	if not hasTiles then
 		children.Warning = Rows.paragraph(3, "No terrain yet. Select parts or use Pick faces.", "warning")
 	elseif settings.paintSelectedOnly and selected == 0 then

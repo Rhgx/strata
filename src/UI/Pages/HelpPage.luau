@@ -1,19 +1,23 @@
 --!strict
 --[[
-	Quick reference, opened from the ? button in the status bar. Read only and kept brief so it
-	fits on one screen alongside tooltips and the status line.
+	Read-only quick reference overlay opened from the status bar's ? button, kept compact enough
+	to scan alongside tooltips and the status line.
 ]]
 
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local Rows = require(script.Parent.Parent.Rows)
+local Settings = require(Plugin.State.Settings)
+
+local Rows = require(UI.Rows)
 
 local e = React.createElement
 
--- Leaves about 96 px for the action at the minimum panel width; every action fits in that.
+-- Leaves ~96 px for action labels at the minimum panel width, which fits every entry.
 local KEY_WIDTH = 88
 local KEY_GAP = 6
 local KEY_ROW_HEIGHT = 18
@@ -30,7 +34,7 @@ local QUICK_START = table.concat({
 	"4. <b>Stitch</b>: snap terrain edges onto roads, floors or walls.",
 }, "\n")
 
--- Keys that work the same in every tool, listed once.
+-- Shortcuts shared across all tools.
 local COMMON_KEYS: { KeyHint } = {
 	{ key = "Ctrl + Scroll", action = "Resize or Reach" },
 	{ key = "[ and ]", action = "Resize or Reach" },
@@ -71,7 +75,6 @@ local PICK_KEYS: { KeyHint } = {
 	{ key = "Esc", action = "Clear picks first" },
 }
 
--- Single-line key/action row built from plain host Frames and Labels.
 local function keyRow(layoutOrder: number, entry: KeyHint)
 	return e("Frame", {
 		LayoutOrder = layoutOrder,
@@ -85,6 +88,7 @@ local function keyRow(layoutOrder: number, entry: KeyHint)
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 		}),
+
 		Action = e(StudioComponents.Label, {
 			Position = UDim2.fromOffset(KEY_WIDTH, 0),
 			Size = UDim2.new(1, -KEY_WIDTH, 1, 0),
@@ -95,7 +99,6 @@ local function keyRow(layoutOrder: number, entry: KeyHint)
 	})
 end
 
--- A list of key rows.
 local function keyTable(layoutOrder: number, keys: { KeyHint })
 	local rows: { [string]: unknown } = {
 		Layout = e("UIListLayout", {
@@ -103,9 +106,11 @@ local function keyTable(layoutOrder: number, keys: { KeyHint })
 			Padding = UDim.new(0, 2),
 		}),
 	}
+
 	for index, entry in keys do
 		rows[`Row{index}`] = keyRow(index, entry)
 	end
+
 	return e("Frame", {
 		LayoutOrder = layoutOrder,
 		Size = UDim2.fromScale(1, 0),
@@ -116,9 +121,10 @@ end
 
 local function HelpPage()
 	return Rows.page({
-		Header = Rows.header(1, "Help", function()
+		Header = Rows.header(1, "Help", function ()
 			Settings.setOverlay("none")
 		end, "**Close help** (`Esc`)."),
+
 		QuickStartHeading = Rows.section(2, "Quick start"),
 		QuickStart = Rows.paragraph(3, QUICK_START),
 		CommonHeading = Rows.section(4, "Every tool"),

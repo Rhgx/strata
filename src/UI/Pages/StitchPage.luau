@@ -1,18 +1,27 @@
 --!strict
--- Options of the running Stitch tool.
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+--[[
+	Options page for the active Stitch tool.
+]]
+
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local Session = require(script.Parent.Parent.Parent.Scene.Session)
-local Rows = require(script.Parent.Parent.Rows)
+local Settings = require(Plugin.State.Settings)
+
+local Session = require(Plugin.Scene.Session)
+
+local Rows = require(UI.Rows)
 
 local e = React.createElement
 
 local function StitchPage(props: { settings: Settings.State })
 	local settings = props.settings
 	local hasTiles = #Session.models() > 0
+
 	return Rows.page({
 		Title = Rows.title(
 			1,
@@ -20,7 +29,9 @@ local function StitchPage(props: { settings: Settings.State })
 			Settings.stopViewportTool,
 			"**Stop stitching** (`Esc`).\n\nBakes stitched tiles if `Bake automatically` is on."
 		),
+
 		Warning = if hasTiles then nil else Rows.paragraph(2, "No terrain yet. Select parts or use Pick faces.", "warning"),
+
 		Reach = Rows.property(
 			3,
 			"Reach",
@@ -30,8 +41,9 @@ local function StitchPage(props: { settings: Settings.State })
 				Max = Settings.STITCH_REACH_MAX,
 				Step = 0.5,
 				Arrows = true,
-				OnValidChanged = function(value: number)
-					Settings.update(function(s)
+
+				OnValidChanged = function (value: number)
+					Settings.update(function (s)
 						s.stitchReach = value
 					end)
 				end,

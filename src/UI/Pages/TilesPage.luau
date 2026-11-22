@@ -1,48 +1,59 @@
 --!strict
--- Actions on the selected tiles: shape, appearance, edges, baking and noise.
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+--[[
+	Selected tiles inspector and action page: detail level, base appearance, cleanup, shape and
+	edge actions, baking, and displacement noise.
+]]
+
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local State = Plugin.State
+local Actions = Plugin.Actions
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local Status = require(script.Parent.Parent.Parent.State.Status)
-local Query = require(script.Parent.Parent.Parent.Scene.Query)
-local Edges = require(script.Parent.Parent.Parent.Actions.Edges)
-local Shape = require(script.Parent.Parent.Parent.Actions.Shape)
-local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
-local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
-local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
-local ColorField = require(script.Parent.Parent.ColorField)
-local Format = require(script.Parent.Parent.Parent.State.Format)
-local Icons = require(script.Parent.Parent.Icons)
-local Rows = require(script.Parent.Parent.Rows)
-local Dropdown = require(script.Parent.Parent.Dropdown)
+local Format = require(State.Format)
+local Status = require(State.Status)
+local Settings = require(State.Settings)
+
+local Query = require(Plugin.Scene.Query)
+
+local Bake = require(Actions.Bake)
+local Edges = require(Actions.Edges)
+local Shape = require(Actions.Shape)
+local Appearance = require(Actions.Appearance)
+local MeshActions = require(Actions.Mesh)
+
+local Rows = require(UI.Rows)
+local Icons = require(UI.Icons)
+local Dropdown = require(UI.Dropdown)
+local ColorField = require(UI.ColorField)
 
 local e = React.createElement
 
--- Hammer powers 2, 3 and 4.
+-- Hammer displacement powers 2, 3, and 4.
 local DETAIL_ITEMS = {
 	{ Id = "2", Text = "Low (5x5)" },
 	{ Id = "3", Text = "Medium (9x9)" },
 	{ Id = "4", Text = "High (17x17)" },
 }
 local DETAIL_NAMES = { [2] = "Low", [3] = "Medium", [4] = "High" }
+-- Sentinel dropdown ID for "no variant" so React never receives an empty key.
+local DEFAULT_VARIANT = "__default__"
 
--- Runs an action that posts its own result; errors are reported in the status bar.
-local function run(action: () -> ())
-	xpcall(action, function(message)
-		Status.post("error", tostring(message))
-	end)
-end
-
--- Material choices, by display name.
 local MATERIAL_ITEMS = {}
+
 for _, material in Appearance.materials() do
 	table.insert(MATERIAL_ITEMS, { Id = material.Name, Text = Appearance.label(material) })
 end
 
--- Dropdown id for "no variant" (an empty id would be an empty React key).
-local DEFAULT_VARIANT = "__default__"
+-- Executes an action and surfaces any raised error in the status bar.
+local function run(action: () -> ())
+	xpcall(action, function (message)
+		Status.post("error", tostring(message))
+	end)
+end
 
 local function reportAppearance(count: number, what: string)
 	if count == 0 then
@@ -52,24 +63,31 @@ local function reportAppearance(count: number, what: string)
 	end
 end
 
--- The Variant row: shown when the material has variants in MaterialService, or a selected tile
--- uses one (so it can be cleared). Disabled while the selected tiles use different materials.
+-- Renders the Variant dropdown when the selected material has MaterialService variants or any
+-- selected tile uses a variant. Disabled while the selection mixes base materials.
 local function variantRow(info: Query.SelectionInfo)
 	local material = info.material
 	local names: { string } = if material then Appearance.variants(material) else {}
+
 	if #names == 0 and not info.anyVariant then
 		return nil
 	end
+
 	local items = { { Id = DEFAULT_VARIANT, Text = "Default" } }
+
 	for _, name in names do
 		table.insert(items, { Id = name, Text = name })
 	end
+
 	local current = info.variant
+
 	if current and current ~= "" and not table.find(names, current) then
-		-- A variant this place does not have (for example from an inserted model).
+		-- Variant referenced by an imported model that is absent from this place.
 		table.insert(items, { Id = current, Text = `{current} (missing)` })
 	end
+
 	local selected = if current == nil then nil elseif current == "" then DEFAULT_VARIANT else current
+
 	return Rows.property(
 		4,
 		"Variant",
@@ -79,12 +97,15 @@ local function variantRow(info: Query.SelectionInfo)
 			SelectedItem = selected,
 			DefaultText = "Mixed",
 			Disabled = material == nil,
-			OnItemSelected = function(id: string?)
+
+			OnItemSelected = function (id: string?)
 				if not id then
 					return
 				end
+
 				local variant = if id == DEFAULT_VARIANT then "" else id
-				run(function()
+
+				run(function ()
 					reportAppearance(
 						Appearance.apply({ variant = variant }, "Strata change variant"),
 						if variant == "" then "the default look" else variant
@@ -97,8 +118,9 @@ local function variantRow(info: Query.SelectionInfo)
 			else "**Custom material variant** from the Material Manager.\n\n> Select tiles with the same `Material` to choose one."
 	)
 end
--- A button for the action grid, with a 14 px icon and a tooltip. Labels name what they act on
--- ("Sew tiles"), since Sew and Stitch alone read as synonyms.
+
+-- Action grid button with a 14 px icon and tooltip. Labels name their target (e.g. "Sew tiles")
+-- so Sew and Stitch stay clearly distinct.
 local function actionButton(
 	layoutOrder: number,
 	text: string,
@@ -132,7 +154,6 @@ local function noiseInput(value: number, onChanged: (number) -> ())
 	})
 end
 
-
 local function reportStitch(report: Edges.StitchReport, reach: number)
 	if report.edges > 0 then
 		Status.post(
@@ -147,7 +168,6 @@ local function reportStitch(report: Edges.StitchReport, reach: number)
 	end
 end
 
--- How many of the selected tiles are baked.
 local function selectedText(info: Query.SelectionInfo): string
 	local tiles = Format.plural(info.count, "tile")
 	local bake = if info.baked == info.count
@@ -155,63 +175,71 @@ local function selectedText(info: Query.SelectionInfo): string
 		elseif info.baked == 0 then "unbaked"
 		else `{info.baked} baked`
 	local parts = if info.parts > 0 then `, {Format.plural(info.parts, "part")}` else ""
+
 	return `{tiles} ({bake}){parts}`
 end
 
--- Bake and Unbake as one control: whichever applies, or both (with counts) for a mixed selection.
+-- Shows Bake, Unbake, or both (with counts) depending on the selection's baked state.
 local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 	local function bake()
 		local ok, result = pcall(Bake.bakeSelected)
 		Bake.report(ok, result, "Baked", "Those tiles are already baked.")
 	end
+
 	local function unbake()
 		local ok, result = pcall(Bake.unbakeSelected)
+
 		if ok then
 			Status.post("success", `Unbaked {Format.plural(result, "tile")} to editable wedges.`)
 		else
 			Status.post("error", `Unbake failed: {result}`)
 		end
 	end
+
 	local bakeTip = "**Merge each tile** into 1 union.\n\n" .. "Materials and textures run smoothly across baked tiles."
 	local unbakeTip = "**Unbake tiles** into editable wedges.\n\n" .. "> Painting a baked tile unbakes it automatically."
-
 	local unbaked = info.count - info.baked
-	-- Baking is what an edited selection leads to, so it is the page's main (blue) button.
+
+	-- Bake is the primary call to action for an unbaked or partially baked selection.
 	if info.baked == 0 then
 		return Rows.button(layoutOrder, "Bake", bake, bakeTip, false, Icons.BakeTiles, true)
 	elseif unbaked == 0 then
 		return Rows.button(layoutOrder, "Unbake", unbake, unbakeTip, false, Icons.UnbakeTiles)
 	end
+
 	return Rows.grid(layoutOrder, 2, {
 		Bake = actionButton(1, `Bake ({unbaked})`, Icons.BakeTiles, false, bake, bakeTip, true),
 		Unbake = actionButton(2, `Unbake ({info.baked})`, Icons.UnbakeTiles, false, unbake, unbakeTip),
 	})
 end
 
--- Clear paint, Restore holes and Restore points: whichever apply. One gets the full width with a
--- longer label; several share the grid with short ones.
+-- Renders applicable cleanup buttons (Clear paint, Restore holes, Restore points): a single
+-- action spans full width with a descriptive label; multiple actions share a 2-column grid.
 local function cleanupRow(layoutOrder: number, info: Query.SelectionInfo)
 	local function clearPaint()
-		run(function()
+		run(function ()
 			local count = Appearance.clearPaint()
 			Status.post("success", `Cleared painted materials from {Format.plural(count, "tile")}.`)
 		end)
 	end
+
 	local function restoreHoles()
-		run(function()
+		run(function ()
 			local count = Appearance.restoreHoles()
 			Status.post("success", `Restored deleted triangles on {Format.plural(count, "tile")}.`)
 		end)
 	end
-	local clearTip = "**Remove painted materials** from the selected tiles.\n\n"
-		.. "Painted areas go back to each tile's own look. Holes stay.\n\n"
-		.. "> Paint with the `Material` tool in the strip."
+
 	local function restorePoints()
-		run(function()
+		run(function ()
 			local count = MeshActions.restorePoints()
 			Status.post("success", `Restored removed points on {Format.plural(count, "tile")}.`)
 		end)
 	end
+
+	local clearTip = "**Remove painted materials** from the selected tiles.\n\n"
+		.. "Painted areas go back to each tile's own look. Holes stay.\n\n"
+		.. "> Paint with the `Material` tool in the strip."
 	local restoreTip = "**Bring back deleted triangles** on the selected tiles.\n\n"
 		.. "They come back in each tile's own look.\n\n"
 		.. "> Cut holes with the `Mesh` tool's `Cut holes` mode."
@@ -221,25 +249,33 @@ local function cleanupRow(layoutOrder: number, info: Query.SelectionInfo)
 
 	type Action = { short: string, long: string, icon: Icons.Icon, run: () -> (), tip: string }
 	local actions: { Action } = {}
+
 	if info.painted > 0 then
 		table.insert(actions, { short = "Clear paint", long = "Clear painted materials", icon = Icons.ClearPaint, run = clearPaint, tip = clearTip })
 	end
+
 	if info.holes > 0 then
 		table.insert(actions, { short = "Restore holes", long = "Restore deleted triangles", icon = Icons.RestoreHoles, run = restoreHoles, tip = restoreTip })
 	end
+
 	if info.simplified > 0 then
 		table.insert(actions, { short = "Restore points", long = "Restore removed points", icon = Icons.RestorePoints, run = restorePoints, tip = pointsTip })
 	end
+
 	if #actions == 0 then
 		return nil
 	elseif #actions == 1 then
 		local only = actions[1]
+
 		return Rows.button(layoutOrder, only.long, only.run, only.tip, nil, only.icon)
 	end
+
 	local cells: { [string]: unknown } = {}
+
 	for i, action in actions do
 		cells[action.short] = actionButton(i, action.short, action.icon, false, action.run, action.tip)
 	end
+
 	return Rows.grid(layoutOrder, 2, cells)
 end
 
@@ -247,7 +283,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 	local settings = props.settings
 	local info = props.info
 
-	-- Properties first (like Studio's Properties window), then one block of actions.
+	-- Properties first (matching Studio's Properties window), followed by actions.
 	return Rows.page({
 		Selected = Rows.value(
 			1,
@@ -258,6 +294,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Selecting a `TerrainArea` or inner part selects its tiles.\n\n"
 				.. "> Extra parts in the selection are used by `Sew tiles`."
 		),
+
 		Detail = Rows.property(
 			2,
 			"Detail",
@@ -265,12 +302,15 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				Items = DETAIL_ITEMS,
 				SelectedItem = if info.power then tostring(info.power) else nil,
 				DefaultText = "Mixed",
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					local power = if id then tonumber(id) else nil
+
 					if not power then
 						return
 					end
-					run(function()
+
+					run(function ()
 						local count = Shape.setDetail(power)
 						Status.post("success", `Set {Format.plural(count, "tile")} to {DETAIL_NAMES[power]} detail.`)
 					end)
@@ -282,6 +322,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "> One step at a time (`Ctrl + Z` undoes).\n"
 				.. "> Hammer: Power."
 		),
+
 		Material = Rows.property(
 			3,
 			"Material",
@@ -290,12 +331,15 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				MaxVisibleRows = 8,
 				SelectedItem = if info.material then info.material.Name else nil,
 				DefaultText = "Mixed",
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					local material = if id then Enum.Material:FromName(id) else nil
+
 					if not material then
 						return
 					end
-					run(function()
+
+					run(function ()
 						reportAppearance(Appearance.apply({ material = material }, "Strata change material"), Appearance.label(material))
 					end)
 				end,
@@ -304,7 +348,9 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Applies right away, without unbaking.\n\n"
 				.. "> Resets `Variant` to `Default`. Changes made with Studio's own material tools are kept too."
 		),
+
 		Variant = variantRow(info),
+
 		Color = e(ColorField, {
 			LayoutOrder = 5,
 			color = info.color,
@@ -315,26 +361,32 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 					.. "- Type `#RRGGBB` or `R, G, B`.\n"
 					.. "- The **pipette** copies `Material`, `Variant` and `Color` from a part you click in 3D.\n\n"
 					.. "> Colors copied from Studio's Properties window paste in.",
-			onCommit = function(color: Color3)
-				run(function()
+
+			onCommit = function (color: Color3)
+				run(function ()
 					reportAppearance(Appearance.apply({ color = color }, "Strata change color"), "the new color")
 				end)
 			end,
+
 			sampling = settings.sampling,
-			onSample = function()
-				Settings.update(function(s)
+
+			onSample = function ()
+				Settings.update(function (s)
 					s.sampling = not s.sampling
 				end)
 			end,
 		}),
 
-		-- Only when a selected tile has painted materials or deleted triangles.
+		-- Rendered only when selected tiles have paint, holes, or removed points.
 		Cleanup = cleanupRow(6, info),
+
 		ActionsHeading = Rows.section(7, "Actions"),
+
 		Actions = Rows.grid(8, 2, {
-			Round = actionButton(1, "Round folds", Icons.RoundFolds, info.count < 2, function()
-				run(function()
+			Round = actionButton(1, "Round folds", Icons.RoundFolds, info.count < 2, function ()
+				run(function ()
 					local count = Shape.round()
+
 					if count == 0 then
 						Status.post("warning", "Nothing moved. Select 2 or more tiles that meet at an angle.")
 					else
@@ -345,10 +397,12 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Needs 2 or more selected tiles. Painted detail stays on top.\n\n"
 				.. "> Example: select a cliff's top and side.\n"
 				.. "> Hammer: Subdivide."),
-			Split = actionButton(2, "Split 2x2", Icons.SplitTiles, info.splittable == 0, function()
-				run(function()
+
+			Split = actionButton(2, "Split 2x2", Icons.SplitTiles, info.splittable == 0, function ()
+				run(function ()
 					local count, skipped = Shape.split()
 					local note = if skipped > 0 then ` Skipped {Format.plural(skipped, "Low detail tile")}.` else ""
+
 					if count == 0 then
 						Status.post("warning", `Nothing split: Low detail tiles cannot be split.{note}`)
 					else
@@ -358,9 +412,11 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			end, "**Split into 4 tiles**, keeping exact shape.\n\n"
 				.. "Medium or High tiles only; drops `Detail` one level.\n\n"
 				.. "> Example: split, then raise `Detail` on one quarter for a path."),
-			Sew = actionButton(3, "Sew tiles", Icons.SewTiles, info.count < 2 and info.parts == 0, function()
-				run(function()
+
+			Sew = actionButton(3, "Sew tiles", Icons.SewTiles, info.count < 2 and info.parts == 0, function ()
+				run(function ()
 					local count, warning = Edges.sewSelected()
+
 					if warning then
 						Status.post("warning", `Sewed {Format.plural(count, "tile")}. {warning}`)
 					elseif count == 0 then
@@ -372,14 +428,16 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			end, "**Close seams** between selected tiles.\n\n"
 				.. "Welds shared edges and corners.\n\n"
 				.. "> Also stitches to any selected normal parts."),
-			Stitch = actionButton(4, "Stitch", Icons.StitchTiles, false, function()
-				run(function()
+
+			Stitch = actionButton(4, "Stitch", Icons.StitchTiles, false, function ()
+				run(function ()
 					reportStitch(Edges.stitchSelected(), settings.stitchReach)
 				end)
 			end, "**Snap tile edges** onto nearby parts.\n\n"
 				.. `Matches block or wedge parts within {settings.stitchReach} st.\n\n`
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
 		}),
+
 		BakeDivider = Rows.divider(9),
 		Bake = bakeRow(10, info),
 
@@ -393,30 +451,32 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				Min = Rows.property(
 					1,
 					"Min",
-					noiseInput(settings.noiseMin, function(value: number)
-						Settings.update(function(s)
+					noiseInput(settings.noiseMin, function (value: number)
+						Settings.update(function (s)
 							s.noiseMin = value
 						end)
 					end),
 					"**Lowest bump** in studs.\n\n"
 						.. "> Negative values push inward."
 				),
+
 				Max = Rows.property(
 					2,
 					"Max",
-					noiseInput(settings.noiseMax, function(value: number)
-						Settings.update(function(s)
+					noiseInput(settings.noiseMax, function (value: number)
+						Settings.update(function (s)
 							s.noiseMax = value
 						end)
 					end),
 					"**Highest bump** in studs.\n\n"
 						.. "> `Min` and `Max` must differ."
 				),
+
 				Apply = Rows.button(
 					3,
 					"Apply noise",
-					function()
-						run(function()
+					function ()
+						run(function ()
 							local count = Shape.addNoise(settings.noiseMin, settings.noiseMax)
 							Status.post(
 								"success",

@@ -1,28 +1,33 @@
 --!strict
 --[[
-	The row of tool buttons pinned to the top of the panel. It mirrors the ribbon buttons, which
-	live on the Plugins tab where builders rarely are, so tools stay one click away from the
-	panel. Icon only, with the full name and keys in tooltips.
+	Top tool button strip pinned to the panel. Mirrors the ribbon buttons (which live on the
+	Plugins tab where builders rarely stay) so every tool stays one click away. Renders icon-only
+	buttons with tool names and shortcuts in hover tooltips.
 ]]
 
-local Packages = script.Parent.Parent.Parent.Packages
+local UI = script.Parent
+local Plugin = UI.Parent
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.State.Settings)
-local Accent = require(script.Parent.Accent)
-local Icons = require(script.Parent.Icons)
-local Tooltip = require(script.Parent.Tooltip)
+local Settings = require(Plugin.State.Settings)
+
+local Icons = require(UI.Icons)
+local Accent = require(UI.Accent)
+local Tooltip = require(UI.Tooltip)
 
 local e = React.createElement
 
 local BUTTON = 24
--- 8 buttons, 7 gaps and the divider fit the panel's minimum width (220 px, 206 inside).
+-- 8 buttons, 7 gaps, and 1 divider fit within the minimum 220 px panel width (206 px inner).
 local GAP = 1
--- Space for the divider between the brushes and the click tools.
+-- Horizontal space reserved for the separator between brush tools and click tools.
 local DIVIDER = 5
--- The brushes before the divider (Raise, Lower, Smooth, Raise To, Material, Mesh).
+-- Number of brush tools placed before the divider (Raise, Lower, Smooth, Raise To, Material, Mesh).
 local BRUSHES = 6
+local ICON_SIZE = 16
 
 local TIPS: { [Settings.Tool]: string } = {
 	Raise = "**Raise**: push terrain outward.\n\n> Hold `Ctrl` to lower, `Shift` to smooth.",
@@ -50,23 +55,19 @@ export type Props = {
 	active: Settings.Tool?,
 }
 
-local ICON_SIZE = 16
-
---[[
-	One tool button, drawn by hand because StudioComponents buttons only take theme colors. Idle
-	brushes show their icon in the tool's color on the normal button; the running brush swaps
-	the two, filling the button with its color and drawing the icon in the normal button color,
-	so the running tool is told by color alone. Pick faces and Stitch have no color and use
-	Studio's own selected style.
-]]
+-- Custom tool button because StudioComponents buttons only accept theme color roles. Idle brush
+-- tools tint their icon in the tool's accent color; the active brush swaps background and icon
+-- colors so the running tool stands out at a glance. Neutral click tools (Pick faces, Stitch)
+-- use Studio's standard selected style.
 local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
 	local theme = StudioComponents.useTheme()
 	local hovered, setHovered = React.useState(false)
 	local pressed, setPressed = React.useState(false)
+
 	local accent = Accent.tool(props.tool, theme)
 	local icon = ICONS[props.tool]
-
 	local modifier = Enum.StudioStyleGuideModifier.Default
+
 	if props.selected then
 		modifier = Enum.StudioStyleGuideModifier.Selected
 	elseif pressed and hovered then
@@ -76,8 +77,9 @@ local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
 	end
 
 	local background, border, iconColor
+
 	if accent and props.selected then
-		-- A touch lighter on hover, like Studio's buttons.
+		-- Brighten slightly on hover, matching Studio button feedback.
 		background = if hovered then accent:Lerp(Color3.new(1, 1, 1), 0.12) else accent
 		border = background
 		iconColor = theme:GetColor(Enum.StudioStyleGuideColor.Button)
@@ -93,23 +95,26 @@ local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
 		Text = "",
 		BackgroundColor3 = background,
 		BorderColor3 = border,
-		[React.Event.InputBegan] = function(_, input: InputObject)
+
+		[React.Event.InputBegan] = function (_, input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseMovement then
 				setHovered(true)
 			elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
 				setPressed(true)
 			end
 		end,
-		[React.Event.InputEnded] = function(_, input: InputObject)
+
+		[React.Event.InputEnded] = function (_, input: InputObject)
 			if input.UserInputType == Enum.UserInputType.MouseMovement then
-				-- Leaving also ends a press, in case the release happens outside.
+				-- Clear pressed state on leave in case mouse-up happens outside the button.
 				setHovered(false)
 				setPressed(false)
 			elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
 				setPressed(false)
 			end
 		end,
-		[React.Event.Activated] = function()
+
+		[React.Event.Activated] = function ()
 			Settings.toggleTool(props.tool)
 		end,
 	}, {
@@ -135,6 +140,7 @@ local function ToolStrip(props: Props)
 			BorderSizePixel = 0,
 			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
 		}),
+
 		Line = e("Frame", {
 			AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new(0, -7, 1, 0),
@@ -143,6 +149,7 @@ local function ToolStrip(props: Props)
 			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
 		}),
 	}
+
 	for index, tool: Settings.Tool in Settings.tools() do
 		local x = (index - 1) * (BUTTON + GAP) + (if index > BRUSHES then DIVIDER else 0)
 		children[tool] = e(Tooltip, {
@@ -151,6 +158,7 @@ local function ToolStrip(props: Props)
 			Size = UDim2.fromOffset(BUTTON, BUTTON),
 		}, e(ToolButton, { tool = tool, selected = props.active == tool }))
 	end
+
 	return e("Frame", {
 		Size = UDim2.new(1, 0, 0, BUTTON + 4),
 		BackgroundTransparency = 1,

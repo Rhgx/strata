@@ -1,22 +1,29 @@
 --!strict
 --[[
-	Edge actions: sewing tiles to each other (Hammer's Sew) and stitching tiles onto normal parts
-	(Core/Stitch), plus the pins behind Keep edges stitched and the autosew that runs after
-	edits.
+	Edge actions: sewing displacements to each other (Hammer's Sew), stitching tile edges onto
+	standard parts (Core/Stitch), maintaining part-edge pins for Keep edges stitched, and running
+	autosew after edits.
 ]]
 
-local Displacement = require(script.Parent.Parent.Core.Displacement)
-local Sew = require(script.Parent.Parent.Core.Sew)
-local Stitch = require(script.Parent.Parent.Core.Stitch)
-local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
-local Query = require(script.Parent.Parent.Scene.Query)
-local Session = require(script.Parent.Parent.Scene.Session)
-local Settings = require(script.Parent.Parent.State.Settings)
+local Plugin = script.Parent.Parent
+local Core = Plugin.Core
+local Scene = Plugin.Scene
+
+local Sew = require(Core.Sew)
+local Stitch = require(Core.Stitch)
+local Displacement = require(Core.Displacement)
+local TerrainInstance = require(Core.TerrainInstance)
+
+local Settings = require(Plugin.State.Settings)
+
+local Query = require(Scene.Query)
+local Session = require(Scene.Session)
+
 local Recording = require(script.Parent.Recording)
 
 type Opened = TerrainInstance.Opened
 
--- What a stitch did: part edges matched, and the tile edges, tiles and parts that moved.
+-- Summary of a stitch operation: matched part edges and the tile edges, tiles, and parts moved.
 export type StitchReport = {
 	matched: number,
 	edges: number,
@@ -24,20 +31,29 @@ export type StitchReport = {
 	parts: number,
 }
 
--- Edges within this distance of a part edge count as stitched to it (Keep edges stitched).
+export type Twin = { opened: Opened, index: number }
+
+type Entry = { opened: Opened, index: number, flat: Vector3 }
+
+-- Maximum distance from a part edge to count as already stitched (used by Keep edges stitched).
 local PIN_REACH = 0.1
+-- Seam points on neighboring tiles share their flat world position within 1/16 stud (matching
+-- Sew's corner tolerance). Points are bucketed in 1-stud cells and checked across 3x3x3
+-- neighboring cells so points near cell boundaries still find their twins.
+local TWIN_DISTANCE = 1 / 16
 
 local Edges = {}
 
 local function count<K>(set: { [K]: true }): number
 	local n = 0
+
 	for _ in set do
 		n += 1
 	end
+
 	return n
 end
 
--- Moves the wedges of sewn displacements and saves them.
 local function applySew(result: Sew.Changes)
 	for opened, changed in result do
 		Session.updateWedges(opened, changed)
@@ -45,34 +61,40 @@ local function applySew(result: Sew.Changes)
 	end
 end
 
--- Writes stitch targets, plus the matching edge vertices of neighboring tiles so seams stay
--- closed, and moves the wedges. Returns the changes and the displacements that changed; the
--- caller saves them.
+-- Applies stitch target positions, propagates them to matching neighbor seam vertices so seams
+-- stay closed, and updates wedges. Returns the vertex changes and modified tiles for saving.
 local function applyMoves(moves: Stitch.Moves): (Stitch.Changes, { Opened })
 	local all = Stitch.propagate(moves, Session.getAll(Session.models()))
 	local changes = Stitch.write(all)
 	local changed: { Opened } = {}
+
 	for opened, vertices in changes do
 		Session.updateWedges(opened, vertices)
 		table.insert(changed, opened)
 	end
+
 	return changes, changed
 end
 
--- Applies a stitch match, saves, and reports what moved. Call inside a recording.
+-- Applies a stitch result, saves modified tiles, and builds a StitchReport. Call inside a recording.
 local function applyStitch(result: Stitch.Result): StitchReport
 	local changes, changed = applyMoves(result.moves)
+
 	for _, opened in changed do
 		TerrainInstance.save(opened)
 	end
+
 	local edges = 0
 	local tiles: { [Opened]: true } = {}
 	local parts: { [BasePart]: true } = {}
+
 	for _, match in result.matches do
 		local vertices = changes[match.opened]
+
 		if not vertices then
 			continue
 		end
+
 		for _, v in match.vertices do
 			if vertices[v] then
 				edges += 1
@@ -82,44 +104,39 @@ local function applyStitch(result: Stitch.Result): StitchReport
 			end
 		end
 	end
+
 	return { matched = #result.matches, edges = edges, tiles = count(tiles), parts = count(parts) }
 end
 
--- The edges of `tiles` that touch a part edge now, to snap back onto it after an edit.
+-- Captures the edges of `tiles` currently touching a part edge so they can be re-snapped after an edit.
 function Edges.pinsFor(tiles: { Opened }): Stitch.Moves
 	if #tiles == 0 then
 		return {}
 	end
+
 	return Stitch.match(tiles, Query.touchingParts(tiles, PIN_REACH), PIN_REACH, false).moves
 end
 
--- Pins plus the matching edge vertices of neighboring tiles, ready for Stitch.write. The brush
--- computes this once per newly reached tile instead of every frame.
+-- Propagates `pins` to matching seam vertices on neighboring tiles, ready for Stitch.write.
+-- Brushes compute this once per newly touched tile rather than every frame.
 function Edges.propagatePins(pins: Stitch.Moves): Stitch.Moves
 	if next(pins) == nil then
 		return {}
 	end
+
 	return Stitch.propagate(pins, Session.getAll(Session.models()))
 end
 
--- Snaps pinned edges back onto their parts and moves the wedges. Returns the displacements that
--- changed; the caller saves them.
+-- Re-snaps pinned edges onto their parts and updates wedges. Caller is responsible for saving.
 function Edges.restorePins(pins: Stitch.Moves): { Opened }
 	if next(pins) == nil then
 		return {}
 	end
+
 	local _, changed = applyMoves(pins)
+
 	return changed
 end
-
--- Seam points of neighboring tiles share their flat world position (sewing matches tiles by
--- their flat corners within 1/16 stud). Points are bucketed in 1 stud cells and compared by
--- distance across neighboring cells, so a point near a cell border still finds its twin.
-local TWIN_DISTANCE = 1 / 16
-
-export type Twin = { opened: Opened, index: number }
-
-type Entry = { opened: Opened, index: number, flat: Vector3 }
 
 local function cellOf(point: Vector3): Vector3
 	return Vector3.new(math.floor(point.X), math.floor(point.Y), math.floor(point.Z))
@@ -129,24 +146,26 @@ local function cellKey(cell: Vector3): string
 	return `{cell.X},{cell.Y},{cell.Z}`
 end
 
---[[
-	A lookup of the same seam point on other tiles: given a tile and one of its edge points, the
-	edge points of other tiles in `all` at the same flat spot. Built once for many lookups.
-]]
+-- Builds a spatial lookup over `all` that maps any (tile, edgeVertex) pair to the edge vertices
+-- on other tiles at the same flat world position. Intended to be built once for many queries.
 function Edges.seamTwins(all: { Opened }): (Opened, number) -> { Twin }
 	local cells: { [string]: { Entry } } = {}
 	local flats: { [Opened]: { [number]: Vector3 } } = {}
+
 	for _, opened in all do
 		local pivot = opened.model:GetPivot()
 		local own: { [number]: Vector3 } = {}
+
 		for _, edge in Displacement.edges(opened.disp) do
 			for _, v in edge.indices do
 				if not own[v] then
 					local flat = pivot * Displacement.flatPosition(opened.disp, v)
 					own[v] = flat
+
 					local key = cellKey(cellOf(flat))
 					local list = cells[key]
 					local entry: Entry = { opened = opened, index = v, flat = flat }
+
 					if list then
 						table.insert(list, entry)
 					else
@@ -155,20 +174,26 @@ function Edges.seamTwins(all: { Opened }): (Opened, number) -> { Twin }
 				end
 			end
 		end
+
 		flats[opened] = own
 	end
-	return function(opened: Opened, index: number): { Twin }
+
+	return function (opened: Opened, index: number): { Twin }
 		local own = flats[opened]
 		local flat = if own then own[index] else nil
 		local result: { Twin } = {}
+
 		if not flat then
 			return result
 		end
+
 		local cell = cellOf(flat)
+
 		for dx = -1, 1 do
 			for dy = -1, 1 do
 				for dz = -1, 1 do
 					local list = cells[cellKey(cell + Vector3.new(dx, dy, dz))]
+
 					if list then
 						for _, entry in list do
 							if entry.opened ~= opened and (entry.flat - flat).Magnitude <= TWIN_DISTANCE then
@@ -179,28 +204,30 @@ function Edges.seamTwins(all: { Opened }): (Opened, number) -> { Twin }
 				end
 			end
 		end
+
 		return result
 	end
 end
 
---[[
-	Where `tiles` have removed points on an edge, that edge shows straight between its kept
-	points, so a neighbor's point at the same spot would stick out of the seam and leave a crack.
-	Moves those neighbor points onto the straight edge (and in-between points of a denser
-	neighbor along with them), like stitching onto a part. Returns the displacements that
-	changed; the caller saves them.
-]]
+-- Closes seam cracks caused by removed edge vertices: where `tiles` render a straight edge
+-- between kept vertices, moves matching neighbor vertices (and intermediate vertices on denser
+-- neighbors) onto that straight edge. Caller is responsible for saving the returned tiles.
 function Edges.closeRemovedSeams(tiles: { Opened }): { Opened }
 	local moves: Stitch.Moves = {}
+
 	for _, opened in tiles do
 		local disp = opened.disp
+
 		if next(disp.removed) == nil then
 			continue
 		end
+
 		Displacement.reproject(disp)
+
 		local pivot = opened.model:GetPivot()
 		local normal = Displacement.faceNormal(disp)
 		local targets: { [number]: Vector3 } = {}
+
 		for _, edge in Displacement.edges(disp) do
 			for _, v in edge.indices do
 				if disp.removed[v] then
@@ -208,122 +235,150 @@ function Edges.closeRemovedSeams(tiles: { Opened }): { Opened }
 				end
 			end
 		end
+
 		if next(targets) ~= nil then
 			moves[opened] = targets
 		end
 	end
+
 	if next(moves) == nil then
 		return {}
 	end
+
 	local _, changed = applyMoves(moves)
+
 	return changed
 end
 
--- Sews `focus` to every displacement in the place. With Keep edges stitched on, edges that
--- touched a part before the edit (`pins`, or found now) are snapped back onto it afterwards,
--- so the part wins at shared corners. Call inside a recording.
+-- Sews `focus` tiles against every displacement in the place. When Keep edges stitched is on,
+-- edges that touched a part beforehand (`pins`, or sampled now) are restored afterwards so part
+-- edges take precedence at shared corners. Call inside a recording.
 function Edges.autosew(focus: { Opened }, pins: Stitch.Moves?)
 	if #focus == 0 then
 		return
 	end
+
 	local pinned = if Settings.get().stitchParts then pins or Edges.pinsFor(focus) else nil
 	local focusSet: { [Opened]: true } = {}
+
 	for _, opened in focus do
 		focusSet[opened] = true
 	end
+
 	applySew((Sew.sew(Session.getAll(Session.models()), focusSet)))
+
 	if pinned then
 		for _, opened in Edges.restorePins(pinned) do
 			TerrainInstance.save(opened)
 		end
 	end
-	-- Sewing averages seam points, which can lift a neighbor's point off an edge that a
-	-- simplified tile shows straight.
+
+	-- Sewing averages seam vertices, which can pull a neighbor's vertex off an edge that a
+	-- simplified tile renders straight.
 	for _, opened in Edges.closeRemovedSeams(Session.getAll(Session.models())) do
 		TerrainInstance.save(opened)
 	end
 end
 
--- Sews the selected displacements to each other and stitches them to any selected normal parts
--- (like sewing to brush faces in Hammer, but within the stitch reach). Returns how many
--- displacements changed, and Sew's warning when some faces could not be sewn.
+-- Sews selected displacements to each other and stitches them to any selected normal parts
+-- within stitch reach (analogous to sewing against brush faces in Hammer). Returns the number
+-- of changed tiles and any Sew warning when faces could not be sewn.
 function Edges.sewSelected(): (number, string?)
 	local targets = Query.selectedTiles()
 	local parts = Query.selectedParts()
+
 	if #targets == 0 or (#targets < 2 and #parts == 0) then
 		return 0, nil
 	end
+
 	local changed: { [Opened]: true } = {}
 	local warning: string? = nil
-	Recording.run("Strata sew", function()
+
+	Recording.run("Strata sew", function ()
 		local sewn, sewWarning = Sew.sew(targets)
 		warning = sewWarning
 		applySew(sewn)
+
 		for opened in sewn do
 			changed[opened] = true
 		end
-		-- Sewing averages seam points, which can lift one off an edge a simplified tile shows
-		-- straight (autosew closes them afterwards too). Only the selected tiles' seams.
+
+		-- Re-align simplified seams on the selected tiles after sew averaging.
 		for _, opened in Edges.closeRemovedSeams(targets) do
 			TerrainInstance.save(opened)
 			changed[opened] = true
 		end
-		-- Parts go last so they win at shared corners.
+
+		-- Stitch to parts last so part edges win at shared corners.
 		if #parts > 0 then
 			local stitched, stitchedList = applyMoves(Stitch.match(targets, parts, Settings.get().stitchReach, true).moves)
+
 			for _, opened in stitchedList do
 				TerrainInstance.save(opened)
 			end
+
 			for opened in stitched do
 				changed[opened] = true
 			end
 		end
+
 		Recording.autoBake()
 	end)
+
 	return count(changed), warning
 end
 
--- Stitches the selected displacements to the block and wedge parts near their edges (found
--- automatically, plus any selected parts).
+-- Stitches selected displacements to nearby block and wedge parts (detected automatically, plus
+-- any explicitly selected parts).
 function Edges.stitchSelected(): StitchReport
 	local targets = Query.selectedTiles()
 	local report: StitchReport = { matched = 0, edges = 0, tiles = 0, parts = 0 }
+
 	if #targets == 0 then
 		return report
 	end
+
 	local reach = Settings.get().stitchReach
 	local parts = Query.touchingParts(targets, reach + 0.5)
+
 	for _, part in Query.selectedParts() do
 		if not table.find(parts, part) then
 			table.insert(parts, part)
 		end
 	end
-	Recording.run("Strata stitch to parts", function()
+
+	Recording.run("Strata stitch to parts", function ()
 		report = applyStitch(Stitch.match(targets, parts, reach, true))
 		Recording.autoBake()
 	end)
+
 	return report
 end
 
--- What stitching nearby tiles to `part` would do, without changing anything. Parts joined to
--- `part` along shared edges (the rest of a floor made of wedges) count as one outline with it.
+-- Computes what stitching nearby tiles to `part` would change without mutating anything. Parts
+-- joined to `part` along shared edges (such as multi-wedge floors) are merged into one outline.
 function Edges.previewStitch(part: BasePart, reach: number): Stitch.Result
 	local tiles = Query.tilesNear(part, reach + 0.5)
+
 	if #tiles == 0 then
 		return { moves = {}, matches = {} }
 	end
+
 	local normal = tiles[1].model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(tiles[1].disp))
 	local parts = Stitch.sheet(part, Query.touchingParts(tiles, reach + 0.5), normal)
+
 	return Stitch.match(tiles, parts, reach, true)
 end
 
--- Stitches every tile near `part` to it (the Stitch tool). Baking waits until the tool stops.
+-- Stitches every tile near `part` onto it (used by the Stitch tool; baking waits until tool exit).
 function Edges.stitchToPart(part: BasePart, reach: number): StitchReport
 	local report: StitchReport = { matched = 0, edges = 0, tiles = 0, parts = 0 }
-	Recording.run("Strata stitch to part", function()
+
+	Recording.run("Strata stitch to part", function ()
 		report = applyStitch(Edges.previewStitch(part, reach))
 		Recording.autoBake()
 	end)
+
 	return report
 end
 

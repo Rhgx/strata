@@ -1,18 +1,20 @@
 --!strict
 --[[
-	Panel controls that take keyboard input themselves (a Dropdown under keyboard control) hold a
-	capture while they do, so Input.onKey leaves those keys to them: Esc closing a dropdown list
-	must not also stop the running tool, and Enter picking an item must not also apply or create.
+	Keyboard capture registry for panel controls that consume key presses directly (such as a
+	keyboard-navigated Dropdown). While any capture is held, Input.onKey yields keys to the
+	control so Esc closes the dropdown without stopping the active tool and Enter selects an
+	item without triggering apply or create.
 ]]
 
 local holders: { [unknown]: true } = {}
 
 local KeyCapture = {}
 
--- Starts a capture for `owner`; returns a function that ends it.
+-- Registers a capture for `owner` and returns a release callback.
 function KeyCapture.hold(owner: unknown): () -> ()
 	holders[owner] = true
-	return function()
+
+	return function ()
 		holders[owner] = nil
 	end
 end

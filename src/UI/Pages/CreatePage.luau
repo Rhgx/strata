@@ -1,33 +1,42 @@
 --!strict
 --[[
-	Turning parts into terrain. Two forms: the selected block and wedge parts (with a Faces
-	choice), or the faces collected by the Pick faces tool.
+	Terrain creation page for converting parts into displacements, supporting both selected
+	block/wedge parts (with a Faces dropdown) and faces collected interactively via Pick faces.
 ]]
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local State = Plugin.State
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local PartFaces = require(script.Parent.Parent.Parent.Core.PartFaces)
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
+local PartFaces = require(Plugin.Core.PartFaces)
 
-local Query = require(script.Parent.Parent.Parent.Scene.Query)
-local Create = require(script.Parent.Parent.Parent.Actions.Create)
-local PickFaceTool = require(script.Parent.Parent.Parent.Viewport.PickFaceTool)
-local Format = require(script.Parent.Parent.Parent.State.Format)
-local Icons = require(script.Parent.Parent.Icons)
-local Rows = require(script.Parent.Parent.Rows)
-local Dropdown = require(script.Parent.Parent.Dropdown)
+local Format = require(State.Format)
+local Settings = require(State.Settings)
+
+local Query = require(Plugin.Scene.Query)
+
+local Create = require(Plugin.Actions.Create)
+
+local PickFaceTool = require(Plugin.Viewport.PickFaceTool)
+
+local Rows = require(UI.Rows)
+local Icons = require(UI.Icons)
+local Dropdown = require(UI.Dropdown)
 
 local e = React.createElement
 
--- Hammer powers 2, 3 and 4.
+-- Hammer displacement powers 2, 3, and 4.
 local DETAIL_ITEMS = {
 	{ Id = "2", Text = "Low (5x5)" },
 	{ Id = "3", Text = "Medium (9x9)" },
 	{ Id = "4", Text = "High (17x17)" },
 }
 
--- The Clear button at the end of the Picked row (the height of a property row).
+-- Square size of the Clear button beside the Picked row (matching property row height).
 local CLEAR_SIZE = 22
 
 local FACE_ITEMS = {
@@ -36,34 +45,35 @@ local FACE_ITEMS = {
 	{ Id = "All", Text = "All faces", Icon = Icons.FacesAll },
 }
 
--- Re-renders when faces are picked or unpicked.
+export type Props = {
+	settings: Settings.State,
+	-- True when showing faces collected by Pick faces rather than the Studio part selection.
+	picking: boolean,
+}
+
 local function usePicks(): { PickFaceTool.Pick }
 	local _, setVersion = React.useState(0)
-	React.useEffect(function()
-		return PickFaceTool.subscribe(function()
-			setVersion(function(v: number)
+
+	React.useEffect(function ()
+		return PickFaceTool.subscribe(function ()
+			setVersion(function (v: number)
 				return v + 1
 			end)
 		end)
 	end, {})
+
 	return PickFaceTool.picks()
 end
-
-
-export type Props = {
-	settings: Settings.State,
-	-- From the Pick faces tool instead of the selected parts.
-	picking: boolean,
-}
 
 local function CreatePage(props: Props)
 	local settings = props.settings
 	local picking = props.picking
 	local picks = usePicks()
+
 	local plan = if picking
 		then Create.planPicks(settings.power, settings.tileSize, picks)
 		else Create.plan(settings.power, settings.tileSize, settings.faces)
-	-- Create refuses parts that would make too many tiles; say so before the click.
+	-- Warn and disable Create ahead of time when any single part exceeds MAX_TILES_PER_PART.
 	local tooMany = plan.largestPart > Create.MAX_TILES_PER_PART
 
 	local createText = if plan.faces == 0
@@ -79,10 +89,12 @@ local function CreatePage(props: Props)
 			e(Dropdown, {
 				Items = DETAIL_ITEMS,
 				SelectedItem = tostring(settings.power),
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					local power = if id then tonumber(id) else nil
+
 					if power then
-						Settings.update(function(s)
+						Settings.update(function (s)
 							s.power = power
 						end)
 					end
@@ -94,6 +106,7 @@ local function CreatePage(props: Props)
 				.. "- **High**: 1,024 wedges (sharp paths).\n\n"
 				.. "> Hammer: Power 2, 3 or 4."
 		),
+
 		TileSize = Rows.property(
 			7,
 			"Tile size",
@@ -103,8 +116,9 @@ local function CreatePage(props: Props)
 				Max = Settings.TILE_SIZE_MAX,
 				Step = 1,
 				Arrows = true,
-				OnValidChanged = function(value: number)
-					Settings.update(function(s)
+
+				OnValidChanged = function (value: number)
+					Settings.update(function (s)
 						s.tileSize = value
 					end)
 				end,
@@ -113,7 +127,9 @@ local function CreatePage(props: Props)
 				.. "Larger faces split into a seamless grid inside a `TerrainArea` model.\n\n"
 				.. "> Example: 32 for general ground, or match a texture repeat."
 		),
+
 		CreateDivider = Rows.divider(8),
+
 		Create = Rows.withTooltip(
 			if picking
 				then "**Replace picked faces** with terrain.\n\n"
@@ -127,7 +143,8 @@ local function CreatePage(props: Props)
 				Text = createText,
 				Icon = Icons.CreateArea,
 				Disabled = plan.faces == 0 or tooMany,
-				OnActivated = function()
+
+				OnActivated = function ()
 					if picking then
 						Create.createPicked(settings.power, settings.tileSize, picks, Settings.stopViewportTool)
 					else
@@ -147,9 +164,10 @@ local function CreatePage(props: Props)
 			Settings.stopViewportTool,
 			"**Stop picking** (`Esc`).\n\nClears any picked faces."
 		)
+
 		if #picks > 0 then
-			-- The Picked row ends in a Clear button. Its tooltip is a sibling of the row's, not
-			-- nested inside it, since nested tooltips would both show.
+			-- Keep the Clear button tooltip as a sibling of the value row so hovering Clear does
+			-- not trigger both tooltips at once.
 			children.Picked = e("Frame", {
 				LayoutOrder = 3,
 				Size = UDim2.new(1, 0, 0, CLEAR_SIZE),
@@ -168,6 +186,7 @@ local function CreatePage(props: Props)
 							.. "> Click a picked face again to unpick it."
 					),
 				}),
+
 				Clear = e("Frame", {
 					AnchorPoint = Vector2.new(1, 0),
 					Position = UDim2.fromScale(1, 0),
@@ -194,6 +213,7 @@ local function CreatePage(props: Props)
 			"**Selected parts** that `Create` will convert.\n\n"
 				.. "> Supports block and wedge parts."
 		)
+
 		children.Faces = Rows.property(
 			3,
 			"Faces",
@@ -201,9 +221,10 @@ local function CreatePage(props: Props)
 				Items = FACE_ITEMS,
 				RowHeight = 20,
 				SelectedItem = settings.faces,
-				OnItemSelected = function(id: string?)
-					Settings.update(function(s)
-						-- Literal assignments keep the FaceMode type exact.
+
+				OnItemSelected = function (id: string?)
+					Settings.update(function (s)
+						-- Assign string literals directly to preserve the FaceMode union type.
 						if id == "Top" then
 							s.faces = "Top"
 						elseif id == "TopSides" then
@@ -222,7 +243,7 @@ local function CreatePage(props: Props)
 		)
 	end
 
-	-- What Create will make, right above the button.
+	-- Preview counts directly above the Create button.
 	if plan.faces > 0 then
 		children.Result = Rows.value(
 			9,

@@ -1,8 +1,8 @@
 --!strict
 --[[
-	The latest operation result, shown in the panel's status bar. Success and warning messages
-	expire after a few seconds; errors stay until the next message. Progress messages (a long
-	bake) are replaced by the result when it is done.
+	Latest operation status shown in the panel's status bar. Success and warning messages expire
+	after a few seconds, errors persist until replaced, and progress messages (such as a long
+	bake) stay until the final result replaces or clears them.
 ]]
 
 export type Kind = "success" | "warning" | "error" | "progress"
@@ -10,7 +10,7 @@ export type Kind = "success" | "warning" | "error" | "progress"
 export type Message = {
 	kind: Kind,
 	text: string,
-	-- Increments per message, so a timer can tell whether its message is still current.
+	-- Monotonic ID so expiration timers can tell whether their message is still active.
 	id: number,
 }
 
@@ -36,13 +36,14 @@ end
 
 function Status.post(kind: Kind, text: string)
 	nextId += 1
+
 	local message: Message = { kind = kind, text = text, id = nextId }
 	current = message
 	notify()
-	-- Progress stays until the result replaces it (see clearProgress); errors until the next
-	-- message.
+
+	-- Progress stays until replaced or cleared via clearProgress; errors stay until the next message.
 	if kind ~= "error" and kind ~= "progress" then
-		task.delay(EXPIRE_SECONDS, function()
+		task.delay(EXPIRE_SECONDS, function ()
 			if current == message then
 				current = nil
 				notify()
@@ -51,7 +52,7 @@ function Status.post(kind: Kind, text: string)
 	end
 end
 
--- Drops a progress message that no result replaced (a bake that ended with nothing to say).
+-- Clears a progress message when an operation finishes without posting a replacement result.
 function Status.clearProgress()
 	if current and current.kind == "progress" then
 		current = nil
@@ -68,7 +69,8 @@ end
 
 function Status.subscribe(listener: Listener): () -> ()
 	listeners[listener] = true
-	return function()
+
+	return function ()
 		listeners[listener] = nil
 	end
 end

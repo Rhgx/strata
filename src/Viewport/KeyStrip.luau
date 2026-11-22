@@ -1,14 +1,13 @@
 --!strict
 --[[
-	A one-line strip at the bottom of the viewport listing the active tool and its keys, in the
-	Studio theme. Click-through, so it never blocks the tool. Used by the brush and the stitch
-	tool.
+	Click-through single-line shortcut bar pinned near the bottom of the 3D viewport, styled with
+	Studio's active theme. Shared across viewport tools.
 ]]
 
 local CoreGui = game:GetService("CoreGui")
 
 export type KeyStrip = {
-	-- Shows `text` (rich text), or hides the strip when nil.
+	-- Displays rich text `text`, or hides the strip when nil.
 	show: (text: string?) -> (),
 	destroy: () -> (),
 }
@@ -59,22 +58,26 @@ function KeyStrip.new(name: string): KeyStrip
 		frame.BorderColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border)
 		label.TextColor3 = theme:GetColor(Enum.StudioStyleGuideColor.MainText)
 	end
+
 	applyTheme()
+
 	local connection = studio.ThemeChanged:Connect(applyTheme)
 	gui.Parent = CoreGui
 
 	return {
-		show = function(text: string?)
+		show = function (text: string?)
 			if text then
 				if label.Text ~= text then
 					label.Text = text
 				end
+
 				gui.Enabled = true
 			else
 				gui.Enabled = false
 			end
 		end,
-		destroy = function()
+
+		destroy = function ()
 			connection:Disconnect()
 			gui:Destroy()
 		end,

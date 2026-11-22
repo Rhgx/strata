@@ -1,11 +1,15 @@
 --!strict
 --[[
-	Lucide icons (https://lucide.dev) from the latte-soft/lucide-icons sprite sheets. 16 px for the
-	tool strip and status bar; 14 px for buttons inside pages and dropdown items, so labels fit
-	two columns at the minimum panel width. Tinted with the Studio theme's text color.
+	Lucide icons (https://lucide.dev) sourced from the latte-soft/lucide-icons sprite sheets.
+	Uses 16 px icons for the tool strip and status bar, and 14 px icons for in-page buttons and
+	dropdown items so two-column layouts fit at the minimum panel width. All icons tint to
+	Studio's theme text color.
 ]]
 
-local Lucide = require(script.Parent.Parent.Parent.Packages.Lucide)
+local Plugin = script.Parent.Parent
+local Packages = Plugin.Parent.Packages
+
+local Lucide = require(Packages.Lucide)
 
 export type Icon = {
 	Image: string,
@@ -20,6 +24,7 @@ local ITEM_SIZE = Vector2.new(14, 14)
 
 local function icon(name: string, size: Vector2?): Icon
 	local asset = Lucide.GetAsset(name, 48)
+
 	return {
 		Image = asset.Url,
 		Size = size or BUTTON_SIZE,
@@ -48,7 +53,7 @@ return table.freeze({
 	ChevronRight = icon("chevron-right"),
 	ChevronDown = icon("chevron-down"),
 
-	-- Buttons inside pages (14 px).
+	-- In-page buttons (14 px).
 	StopTool = item("circle-stop"),
 	Noise = item("audio-waveform"),
 	CreateArea = item("grid-3x3"),
@@ -75,7 +80,7 @@ return table.freeze({
 	BakeTiles = item("group"),
 	UnbakeTiles = item("ungroup"),
 
-	-- Dropdown items.
+	-- Dropdown items (14 px).
 	FacesTop = item("arrow-up"),
 	FacesTopSides = item("box"),
 	FacesAll = item("boxes"),

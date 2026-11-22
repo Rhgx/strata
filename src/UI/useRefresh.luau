@@ -1,37 +1,44 @@
 --!strict
 --[[
-	Re-renders the component when the Studio selection changes, a new status message is posted
-	(operations post one when they finish), or the user undoes or redoes, so derived values such
-	as selection and tile counts stay current.
+	React hook that triggers a re-render whenever the Studio selection changes, a status message
+	is posted (including operation completions), or undo/redo runs, keeping derived selection and
+	tile counts current.
 ]]
 
-local ChangeHistoryService = game:GetService("ChangeHistoryService")
 local Selection = game:GetService("Selection")
+local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
-local React = require(script.Parent.Parent.Parent.Packages.React)
+local Plugin = script.Parent.Parent
+local Packages = Plugin.Parent.Packages
 
-local Status = require(script.Parent.Parent.State.Status)
+local React = require(Packages.React)
+
+local Status = require(Plugin.State.Status)
 
 local function useRefresh()
 	local _, setVersion = React.useState(0)
-	React.useEffect(function()
+
+	React.useEffect(function ()
 		local function bump()
-			setVersion(function(v: number)
+			setVersion(function (v: number)
 				return v + 1
 			end)
 		end
+
 		local connections = {
 			Selection.SelectionChanged:Connect(bump),
 			ChangeHistoryService.OnUndo:Connect(bump),
 			ChangeHistoryService.OnRedo:Connect(bump),
 		}
-		local unsubscribe = Status.subscribe(function()
+		local unsubscribe = Status.subscribe(function ()
 			bump()
 		end)
-		return function()
+
+		return function ()
 			for _, connection in connections do
 				connection:Disconnect()
 			end
+
 			unsubscribe()
 		end
 	end, {})

@@ -1,28 +1,27 @@
 --!strict
 --[[
-	Shows the brush size in the 3D view while the panel's Radius control changes, since the mouse
-	is over the panel then and the cursor is not on the terrain. For a moment after each change,
-	the running tool draws its cursor where the middle of the 3D view meets the terrain (not where
-	the mouse last was: the plugin mouse stops updating at the viewport border), with a small
-	"Radius 8 st" label under it. Moving the mouse back over the 3D view ends it at once.
+	Shows a temporary 3D brush size preview when the user adjusts Radius in the panel (while the
+	pointer is off the viewport and PluginMouse stops updating). Displays the active tool's
+	cursor where the viewport center ray hits terrain (or at a fixed distance ahead of the camera
+	as fallback) along with a floating "Radius X st" label. Moving the pointer back over the 3D
+	viewport cancels the preview immediately.
 ]]
 
 local CoreGui = game:GetService("CoreGui")
 
-local RadiusPreview = {}
-
 local SHOW_SECONDS = 1.2
--- With no terrain in the middle of the view, the preview sits this far ahead of the camera
--- (scaled with the radius, so the ring fits on screen).
+-- Fallback distance bounds ahead of the camera when no terrain lies under the viewport center.
 local MIN_DISTANCE, MAX_DISTANCE = 24, 120
+
+local studio = settings().Studio
 
 local showUntil = 0
 local label: TextLabel? = nil
-local studio = settings().Studio
 
--- Starts the preview after the Radius changed in the panel.
--- A flat ring that shows a brush's radius in the 3D view (the tools' cursors and size previews).
--- Hidden until placed; the caller sets CFrame, Radius, InnerRadius and Color3, and destroys it.
+local RadiusPreview = {}
+
+-- Creates a flat CylinderHandleAdornment ring for viewport brush cursors and size previews.
+-- Starts hidden; the caller configures CFrame, Radius, InnerRadius, Color3, and destroys it.
 function RadiusPreview.newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
 	local ring = Instance.new("CylinderHandleAdornment")
 	ring.Name = name
@@ -32,9 +31,11 @@ function RadiusPreview.newRing(name: string, alwaysOnTop: boolean, transparency:
 	ring.Transparency = transparency
 	ring.Visible = false
 	ring.Parent = CoreGui
+
 	return ring
 end
 
+-- Starts or extends the viewport radius preview after a panel Radius edit.
 function RadiusPreview.pulse()
 	showUntil = os.clock() + SHOW_SECONDS
 end
@@ -47,41 +48,51 @@ function RadiusPreview.active(): boolean
 	return os.clock() < showUntil
 end
 
--- The ray through the middle of the 3D view.
+-- Returns a ray cast through the center of the active viewport.
 function RadiusPreview.ray(): Ray?
 	local camera = workspace.CurrentCamera
+
 	if not camera then
 		return nil
 	end
+
 	local size = camera.ViewportSize
+
 	return camera:ViewportPointToRay(size.X * 0.5, size.Y * 0.5)
 end
 
--- Where the preview goes when the middle of the view shows no terrain: a point straight ahead,
--- facing the camera.
+-- Fallback preview position and camera-facing normal when no terrain is under the center ray.
 function RadiusPreview.fallback(radius: number): (Vector3?, Vector3?)
 	local ray = RadiusPreview.ray()
+
 	if not ray then
 		return nil
 	end
+
 	local distance = math.clamp(radius * 4, MIN_DISTANCE, MAX_DISTANCE)
+
 	return ray.Origin + ray.Direction.Unit * distance, -ray.Direction.Unit
 end
 
--- Shows the label under `position`, or hides it when nil.
+-- Positions the floating readout below `position` in screen space, or hides it when nil.
 function RadiusPreview.label(position: Vector3?, text: string?)
 	local current = label
+
 	if not current then
 		return
 	end
+
 	local gui = current.Parent and current.Parent.Parent
 	local camera = workspace.CurrentCamera
+
 	if not position or not text or not camera or not gui or not gui:IsA("ScreenGui") then
 		if gui and gui:IsA("ScreenGui") then
 			gui.Enabled = false
 		end
+
 		return
 	end
+
 	local point, visible = camera:WorldToViewportPoint(position)
 	local size = camera.ViewportSize
 	local frame = current.Parent :: Frame
@@ -90,8 +101,7 @@ function RadiusPreview.label(position: Vector3?, text: string?)
 	gui.Enabled = visible
 end
 
--- Creates the label and ends the preview when the mouse moves over the 3D view. Returns a
--- function that stops.
+-- Creates the floating label GUI and listens for mouse motion to dismiss previews. Returns cleanup.
 function RadiusPreview.start(plugin: Plugin): () -> ()
 	local gui = Instance.new("ScreenGui")
 	gui.Name = "StrataRadiusPreview"
@@ -131,6 +141,7 @@ function RadiusPreview.start(plugin: Plugin): () -> ()
 		frame.BorderColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border)
 		text.TextColor3 = theme:GetColor(Enum.StudioStyleGuideColor.MainText)
 	end
+
 	applyTheme()
 	gui.Parent = CoreGui
 
@@ -138,10 +149,12 @@ function RadiusPreview.start(plugin: Plugin): () -> ()
 		studio.ThemeChanged:Connect(applyTheme),
 		plugin:GetMouse().Move:Connect(RadiusPreview.cancel),
 	}
-	return function()
+
+	return function ()
 		for _, connection in connections do
 			connection:Disconnect()
 		end
+
 		label = nil
 		gui:Destroy()
 		showUntil = 0

@@ -1,17 +1,26 @@
 --!strict
--- Options of the running brush (Raise, Lower, Smooth or Raise To).
-local Packages = script.Parent.Parent.Parent.Parent.Packages
+--[[
+	Options page for the active sculpt brush (Raise, Lower, Smooth, or Raise To).
+]]
+
+local UI = script.Parent.Parent
+local Plugin = UI.Parent
+local Scene = Plugin.Scene
+local Packages = Plugin.Parent.Packages
+
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
-local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
-local Session = require(script.Parent.Parent.Parent.Scene.Session)
-local Query = require(script.Parent.Parent.Parent.Scene.Query)
+local Settings = require(Plugin.State.Settings)
 
-local Icons = require(script.Parent.Parent.Icons)
-local Rows = require(script.Parent.Parent.Rows)
-local Dropdown = require(script.Parent.Parent.Dropdown)
+local Query = require(Scene.Query)
+local Session = require(Scene.Session)
+
+local RadiusPreview = require(Plugin.Viewport.RadiusPreview)
+
+local Rows = require(UI.Rows)
+local Icons = require(UI.Icons)
+local Dropdown = require(UI.Dropdown)
 
 local e = React.createElement
 
@@ -29,13 +38,14 @@ local AXIS_ICONS: { [Settings.Axis]: Icons.Icon } = {
 	Subdiv = Icons.AxisCurved,
 }
 
--- Raise To's reference: each tile's flat base, or the world origin.
+-- Raise To reference frame: each tile's flat base face, or the world origin.
 local FROM_ITEMS = {
 	{ Id = "Tile", Text = "Tile base" },
 	{ Id = "World", Text = "World" },
 }
 
 local AXIS_ITEMS = {}
+
 for _, axis: Settings.Axis in Settings.axes() do
 	table.insert(AXIS_ITEMS, { Id = axis, Text = Settings.axisLabel(axis), Icon = AXIS_ICONS[axis] })
 end
@@ -51,7 +61,6 @@ local function slider(value: number, min: number, max: number, onChanged: (numbe
 	})
 end
 
-
 local function BrushPage(props: { settings: Settings.State })
 	local settings = props.settings
 	local mode: Settings.BrushMode = settings.mode
@@ -63,11 +72,12 @@ local function BrushPage(props: { settings: Settings.State })
 			Settings.stopViewportTool,
 			"**Stop painting** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
 		),
+
 		Radius = Rows.property(
 			3,
 			"Radius",
-			slider(settings.radius, Settings.RADIUS_MIN, Settings.RADIUS_MAX, function(value: number)
-				Settings.update(function(s)
+			slider(settings.radius, Settings.RADIUS_MIN, Settings.RADIUS_MAX, function (value: number)
+				Settings.update(function (s)
 					s.radius = value
 				end)
 				RadiusPreview.pulse()
@@ -76,7 +86,9 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "The brush always reaches at least one grid step (set by `Detail`). Below that, a smaller radius pushes more gently.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
+
 		DirectionHeading = Rows.section(9, "Direction"),
+
 		Axis = Rows.property(
 			10,
 			"Axis",
@@ -84,10 +96,11 @@ local function BrushPage(props: { settings: Settings.State })
 				Items = AXIS_ITEMS,
 				RowHeight = 20,
 				SelectedItem = settings.axis,
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					for _, axis: Settings.Axis in Settings.axes() do
 						if id == axis then
-							Settings.update(function(s)
+							Settings.update(function (s)
 								s.axis = axis
 							end)
 						end
@@ -100,13 +113,14 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "- **Picked**: face angle (`Alt + Right Click`).\n"
 				.. "- **Curved (Round)**: follows `Round` curves."
 		),
-		-- Which tiles the brush affects, so it sits with the brush settings, not under Direction.
+
+		-- Controls brush targeting rather than axis direction, so it sits above the Direction section.
 		SelectedOnly = Rows.checkbox(
 			8,
 			"Selected only",
 			settings.paintSelectedOnly,
-			function()
-				Settings.update(function(s)
+			function ()
+				Settings.update(function (s)
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
@@ -115,9 +129,10 @@ local function BrushPage(props: { settings: Settings.State })
 		),
 	}
 
-	-- Raise To sets a Height. With Hard falloff it jumps straight there (Hammer's absolute
-	-- mode), so it has no Strength; with Soft falloff it eases there at Strength speed.
+	-- Raise To targets a Height. Hard falloff snaps directly (Hammer's absolute mode) and hides
+	-- Strength; Soft falloff eases toward Height at Strength speed.
 	local raiseTo = mode == "RaiseTo"
+
 	if raiseTo then
 		children.From = Rows.property(
 			4,
@@ -126,11 +141,13 @@ local function BrushPage(props: { settings: Settings.State })
 				Items = FROM_ITEMS,
 				RowHeight = 20,
 				SelectedItem = if settings.raiseToWorld then "World" else "Tile",
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					if id == "World" or id == "Tile" then
-						Settings.update(function(s)
+						Settings.update(function (s)
 							s.raiseToWorld = id == "World"
-							-- A world height is measured along a world axis: Up unless one was set.
+
+							-- World heights require a world axis; default to Up if currently per-tile.
 							if id == "World" and (s.axis == "Face" or s.axis == "Subdiv") then
 								s.axis = "Up"
 							end
@@ -142,6 +159,7 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "- **Tile base**: each tile's own flat face (0 flattens hills back).\n"
 				.. "- **World**: the world origin, so one Height lines up across tiles at different levels, such as a road over stepped ground. Use with the `Up (Y)` axis for a world Y height."
 		)
+
 		children.Height = Rows.property(
 			5,
 			"Height",
@@ -151,8 +169,9 @@ local function BrushPage(props: { settings: Settings.State })
 				Max = Settings.HEIGHT_MAX,
 				Step = 0.5,
 				Arrows = true,
-				OnValidChanged = function(value: number)
-					Settings.update(function(s)
+
+				OnValidChanged = function (value: number)
+					Settings.update(function (s)
 						s.height = value
 					end)
 				end,
@@ -162,12 +181,13 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "> `Ctrl + Click` terrain in 3D to pick its height. From `Tile base`, 0 resets hills to flat."
 		)
 	end
+
 	if not raiseTo or settings.falloff == "Soft" then
 		children.Strength = Rows.property(
 			6,
 			"Strength",
-			slider(settings.strength, Settings.STRENGTH_MIN, Settings.STRENGTH_MAX, function(value: number)
-				Settings.update(function(s)
+			slider(settings.strength, Settings.STRENGTH_MIN, Settings.STRENGTH_MAX, function (value: number)
+				Settings.update(function (s)
 					s.strength = value
 				end)
 			end),
@@ -177,7 +197,7 @@ local function BrushPage(props: { settings: Settings.State })
 		)
 	end
 
-	-- Falloff changes Raise, Lower and Raise To.
+	-- Falloff applies to Raise, Lower, and Raise To (Smooth always uses Soft falloff).
 	if mode ~= "Smooth" then
 		children.Falloff = Rows.property(
 			7,
@@ -186,9 +206,10 @@ local function BrushPage(props: { settings: Settings.State })
 				Items = FALLOFF_ITEMS,
 				RowHeight = 20,
 				SelectedItem = settings.falloff,
-				OnItemSelected = function(id: string?)
+
+				OnItemSelected = function (id: string?)
 					if id == "Soft" or id == "Hard" then
-						Settings.update(function(s)
+						Settings.update(function (s)
 							s.falloff = id
 						end)
 					end
@@ -199,8 +220,10 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "- **Hard**: moves everything inside equally (flat steps). With `Raise To`, jumps straight to the height."
 		)
 	end
+
 	if settings.axis == "Picked" then
 		local v = settings.pickedAxis
+
 		children.Picked = Rows.value(
 			11,
 			"Picked",
@@ -212,7 +235,7 @@ local function BrushPage(props: { settings: Settings.State })
 		)
 	end
 
-	-- Say so when a drag would do nothing, instead of failing silently.
+	-- Warn explicitly when dragging would have no targets instead of doing nothing silently.
 	if #Session.models() == 0 then
 		children.Warning = Rows.paragraph(2, "No terrain yet. Select parts or use Pick faces.", "warning")
 	elseif settings.paintSelectedOnly and #Query.selectedModels() == 0 then

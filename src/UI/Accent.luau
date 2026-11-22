@@ -1,12 +1,14 @@
 --!strict
 --[[
-	The few colors the panel adds to Studio's theme. Each brush tool has one color, the same hue
-	as its cursor in the 3D view, so the tool strip, the tool page and the viewport read as one.
-	Success messages are green. Everything else stays in Studio's own theme colors. Light theme
-	values are darker, so they keep their contrast on a light background.
+	Accent colors layered onto Studio's theme. Each brush tool uses a single hue shared with its
+	3D viewport cursor so the tool strip, tool page, and viewport read cohesively. Success status
+	messages use green; everything else defers to Studio's theme colors. Light theme values are
+	darkened to preserve contrast on light backgrounds.
 ]]
 
-local Settings = require(script.Parent.Parent.State.Settings)
+local Plugin = script.Parent.Parent
+
+local Settings = require(Plugin.State.Settings)
 
 type Tool = Settings.Tool
 
@@ -33,13 +35,14 @@ local SUCCESS_LIGHT = Color3.fromRGB(24, 122, 44)
 
 local Accent = {}
 
--- By the background's brightness rather than the theme's name, so custom themes work too.
+-- Detects light themes by background luminance rather than theme name so custom themes work too.
 local function isLight(theme: StudioTheme): boolean
 	local background = theme:GetColor(Enum.StudioStyleGuideColor.MainBackground)
+
 	return background.R + background.G + background.B > 1.5
 end
 
--- The tool's color, or nil for the click tools (Pick faces, Stitch), which stay neutral.
+-- Returns the accent color for `tool`, or nil for neutral click tools (Pick faces, Stitch).
 function Accent.tool(tool: Tool, theme: StudioTheme): Color3?
 	return (if isLight(theme) then LIGHT else DARK)[tool]
 end

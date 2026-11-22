@@ -1,16 +1,24 @@
 --!strict
-local React = require(script.Parent.Parent.Parent.Packages.React)
+--[[
+	React hook that subscribes a component to shared tool settings in State/Settings.
+]]
 
-local Settings = require(script.Parent.Parent.State.Settings)
+local Plugin = script.Parent.Parent
+local Packages = Plugin.Parent.Packages
 
--- Re-renders the component whenever the shared tool settings change.
+local React = require(Packages.React)
+
+local Settings = require(Plugin.State.Settings)
+
 local function useSettings(): Settings.State
 	local state, setState = React.useState(Settings.get())
-	React.useEffect(function()
-		return Settings.subscribe(function(nextState)
+
+	React.useEffect(function ()
+		return Settings.subscribe(function (nextState)
 			setState(nextState)
 		end)
 	end, {})
+
 	return state
 end
 

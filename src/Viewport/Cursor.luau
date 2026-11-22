@@ -1,14 +1,15 @@
 --!strict
 --[[
-	What the running tool says about the mouse, for the cursor. Tools set a hint every frame;
-	Activation owns mouse.Icon and turns the hint, the running tool and baking into one icon
-	(see Activation for the order). The hint is cleared whenever the tool changes, so a tool that
-	stopped can never leave its cursor behind.
+	Cursor hint channel shared between viewport tools and Viewport/Activation. Tools report their
+	per-frame state here; Activation owns mouse.Icon and combines the hint, active tool, and
+	baking status into one icon. Activation clears the hint on every tool switch so a stopped
+	tool never leaves stale cursor state behind.
 
-	- "resize": an Alt + Drag resize is running.
-	- "empty": the tool has nothing to act on (no terrain, or Selected only with none selected).
-	- "valid" / "invalid": a click tool (Pick faces, Stitch, Sample, the Material pipette) is over
-	  something it can or cannot use.
+	Hints:
+	- "resize": an Alt + Drag resize is in progress.
+	- "empty": the tool has no targets (no terrain, or Selected only with none selected).
+	- "valid" / "invalid": a click tool (Pick faces, Stitch, Sample, Material pipette) is over
+	  a usable or unusable target.
 ]]
 
 export type Hint = "resize" | "empty" | "valid" | "invalid"
