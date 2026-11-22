@@ -241,7 +241,8 @@ local MAX_SMOOTH_RATE = 24
 local RAISE_TO_RATE = 2.5
 -- A brush smaller than the grid would sit between vertices and do nothing, so it always
 -- reaches at least one grid step (three quarters of one with Hard falloff, which still moves
--- only the vertex under the cursor when aimed at one).
+-- only the vertex under the cursor when aimed at one). Below that size the radius still matters:
+-- the brush pushes more gently in proportion (see gentleness), so radius 1 and 3 differ.
 local MIN_SOFT_STEPS = 1
 local MIN_HARD_STEPS = 0.75
 -- How much a vertex's offset along its tile's normal counts toward its distance from the
@@ -299,6 +300,9 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 		local disp = item.opened.disp
 		local radius = Paint.effectiveRadius(item.opened, brush)
 		local r2 = radius * radius
+		-- A radius smaller than the grid allows still reaches one grid step, but pushes as much
+		-- less as it is smaller.
+		local gentleness = math.min(1, brush.radius / radius)
 		local worldNormal = item.pivot:VectorToWorldSpace(item.faceNormal)
 		for index, p in item.world do
 			-- Raise and Lower add up every sample along the path (their effect is additive);
@@ -326,18 +330,18 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 					-- Hammer's absolute mode: straight to the height.
 					vector = target
 				else
-					local alpha = 1 - math.exp(-brush.strength * RAISE_TO_RATE * softFalloff(nearest2, r2) * dt)
+					local alpha = 1 - math.exp(-brush.strength * RAISE_TO_RATE * softFalloff(nearest2, r2) * gentleness * dt)
 					vector = current:Lerp(target, alpha)
 				end
 			elseif grid then
 				local smoothRadius = math.max(radius * SMOOTH_RADIUS_SHARE, item.spacing * SMOOTH_STEPS)
 				local unitAxis = if axis.Magnitude > 1e-6 then axis.Unit else item.faceNormal
 				local h = smoothHeight(grid, p, item.pivot:VectorToWorldSpace(unitAxis), smoothRadius)
-				vector = current + unitAxis * (h * approach(smoothRate, dt) * softFalloff(nearest2, r2))
+				vector = current + unitAxis * (h * approach(smoothRate, dt) * softFalloff(nearest2, r2) * gentleness)
 			else
 				local sign = if brush.effect == "Raise" then 1 else -1
 				local weight = summed / #centers
-				vector = current + axis * (sign * brush.strength * weight * dt)
+				vector = current + axis * (sign * brush.strength * weight * gentleness * dt)
 			end
 			if (vector - current).Magnitude > MIN_MOVE then
 				table.insert(moves, { item = item, index = index, vector = vector })

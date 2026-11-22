@@ -11,10 +11,9 @@
 		Ctrl + scroll      resize the brush ([ and ] too, on layouts that have them)
 		Esc                stop
 
-	What gets painted: the triangle under the cursor, plus every triangle whose center is inside
-	the brush. By default whole grid cells (both triangles of a quad) are painted together, so
-	edges come out as clean steps instead of a sawtooth; Fine paints single triangles. Nothing
-	moves, so unlike the sculpt brushes there is no strength, falloff or sewing.
+	What gets painted is decided by TriangleBrush. Nothing moves, so unlike the sculpt brushes
+	there is no strength, falloff or sewing. Painting and erasing never fill a hole (the Mesh
+	tool's Cut holes mode owns those).
 ]]
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
@@ -23,49 +22,38 @@ local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local Displacement = require(script.Parent.Parent.Core.Displacement)
-local SurfaceRay = require(script.Parent.Parent.Core.SurfaceRay)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.State.Status)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Bake = require(script.Parent.Parent.Actions.Bake)
+local Input = require(script.Parent.Input)
 local KeyStrip = require(script.Parent.KeyStrip)
+local Lines = require(script.Parent.Lines)
+local RadiusPreview = require(script.Parent.RadiusPreview)
+local TileHit = require(script.Parent.TileHit)
+local TriangleBrush = require(script.Parent.TriangleBrush)
+local TriangleOutline = require(script.Parent.TriangleOutline)
 
 type Opened = TerrainInstance.Opened
 
-type Hit = {
-	position: Vector3,
-	normal: Vector3,
-	opened: Opened,
-	-- The triangle under the cursor, when the exact triangle could be found.
-	triangle: number?,
-}
-
 local RAY_LENGTH = 10000
--- Tiles facing away from the hit surface by more than this are skipped (see BrushTool).
-local BACK_FACE_DOT = -0.25
--- Brush samples along a frame's path: about half a radius apart, at most this many.
-local STEP_SHARE = 0.5
-local MIN_STEP = 0.5
-local MAX_STEPS = 16
 -- Invisible parts are looked through when picking a look, up to this many.
 local MAX_SKIPS = 8
 -- Each look bakes into its own union, so past this many looks on one tile the user is told.
 local LOOK_WARNING = 4
 local ERASE_COLOR = Color3.fromRGB(230, 96, 80)
+-- The cursor outline: a fixed, high-contrast blue (the paint color itself can vanish, like dark
+-- asphalt in shadow).
+local PAINT_COLOR = Color3.fromRGB(70, 175, 255)
+local MAX_OUTLINE_LINES = 300
+-- The outline is rebuilt when the cursor moves at least this far (or anything else changes).
+local OUTLINE_MOVE = 0.25
 local SEPARATOR = KeyStrip.SEPARATOR
 
 local function formatStuds(value: number): string
 	return if value == math.floor(value) then tostring(value) else string.format("%.1f", value)
-end
-
-local function isDown(a: Enum.KeyCode, b: Enum.KeyCode): boolean
-	return UserInputService:IsKeyDown(a) or UserInputService:IsKeyDown(b)
-end
-
-local function erasing(): boolean
-	return isDown(Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl)
 end
 
 local function describe(look: Displacement.Look): string
@@ -96,19 +84,25 @@ return function(plugin: Plugin): () -> ()
 	-- Per stroke.
 	local recording: string? = nil
 	local touched: { [Opened]: true } = {}
-	-- Triangle centers (world) per tile, computed once per stroke: nothing moves while painting.
-	local centers: { [Opened]: { Vector3 } } = {}
+	-- Shown triangle centers (world) per tile: nothing moves while painting, so they are kept
+	-- across frames until the tile moves or the tool stops.
+	local centers: { [Opened]: { pivot: CFrame, list: { Vector3 } } } = {}
 	local warned: { [Opened]: true } = {}
 	local lastCenter: Vector3? = nil
 	local wasColoring = false
 
-	local ring = newRing("StrataMaterialCursor", false, 0.2)
-	local ghost = newRing("StrataMaterialGhost", true, 0.78)
+	-- The cursor is the outline of the triangles a click would paint. The ring only shows the
+	-- size during a radius preview with no terrain in the middle of the view.
+	local ring = newRing("StrataMaterialPreview", true, 0.5)
 	local keyStrip = KeyStrip.new("StrataMaterialHints")
+	local outline = Lines.new("StrataMaterialOutline", MAX_OUTLINE_LINES)
+	local outlined: { opened: Opened, triangle: number?, position: Vector3, radius: number, fine: boolean, erase: boolean }? = nil
 
 	local function hideCursor()
 		ring.Visible = false
-		ghost.Visible = false
+		outline.clear()
+		outlined = nil
+		RadiusPreview.label(nil)
 	end
 
 	local function workingModels(): { Model }
@@ -118,111 +112,53 @@ return function(plugin: Plugin): () -> ()
 		return Session.models()
 	end
 
-	-- The tile surface under the mouse, with the exact triangle when it can be found.
-	local function findHit(models: { Model }): Hit?
-		if #models == 0 then
-			return nil
-		end
-		local ray = mouse.UnitRay
-		local direction = ray.Direction.Unit
-		local filter: { Instance } = table.create(#models)
-		for i, model in models do
-			filter[i] = model
-		end
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = filter
-		local live = workspace:Raycast(ray.Origin, direction * RAY_LENGTH, params)
-		if not live then
-			return nil
-		end
-		local model = Query.displacementOf(live.Instance)
-		local opened = if model then Session.get(model) else nil
-		if not opened then
-			return nil
-		end
-		-- The wedges and unions follow the data exactly, so the data tells which triangle it is.
-		local exact = SurfaceRay.cast(ray.Origin, direction, RAY_LENGTH, { SurfaceRay.snapshot(opened) })
-		if exact then
-			return {
-				position = ray.Origin + direction * exact.distance,
-				normal = exact.normal,
-				opened = opened,
-				triangle = exact.triangle,
-			}
-		end
-		return { position = live.Position, normal = live.Normal, opened = opened, triangle = nil }
-	end
-
 	local function centersOf(opened: Opened): { Vector3 }
-		local cached = centers[opened]
-		if cached then
-			return cached
-		end
-		local disp = opened.disp
 		local pivot = opened.model:GetPivot()
-		local positions = Displacement.positions(disp)
-		local result = table.create(Displacement.triangleCount(disp))
-		for t = 1, Displacement.triangleCount(disp) do
-			local i1, i2, i3 = Displacement.triangle(disp, t)
-			result[t] = pivot * ((positions[i1] + positions[i2] + positions[i3]) / 3)
+		local cached = centers[opened]
+		if cached and cached.pivot == pivot then
+			return cached.list
 		end
-		centers[opened] = result
-		return result
+		local computed = TileHit.centers(opened)
+		centers[opened] = { pivot = pivot, list = computed }
+		return computed
 	end
 
-	local function paintAt(models: { Model }, hit: Hit)
+	-- Outlines what a click at hit would paint (skipped while nothing that matters changed).
+	local function drawOutline(models: { Model }, hit: TileHit.Hit, settings: Settings.State, erase: boolean)
+		local last = outlined
+		if
+			last
+			and last.opened == hit.opened
+			and last.triangle == hit.triangle
+			and last.radius == settings.radius
+			and last.fine == settings.paintFine
+			and last.erase == erase
+			and (last.position - hit.position).Magnitude < OUTLINE_MOVE
+		then
+			return
+		end
+		outlined = { opened = hit.opened, triangle = hit.triangle, position = hit.position, radius = settings.radius, fine = settings.paintFine, erase = erase }
+		local covered: { TriangleOutline.Covered } = {}
+		for _, opened in TriangleBrush.tilesInReach(models, hit, settings.radius, 0) do
+			local grids = TriangleBrush.gridTriangles(opened, hit, { hit.position }, settings.radius, settings.paintFine, centersOf(opened))
+			table.insert(covered, { opened = opened, grids = grids })
+		end
+		TriangleOutline.draw(outline, covered, if erase then ERASE_COLOR else PAINT_COLOR)
+	end
+
+	local function paintAt(models: { Model }, hit: TileHit.Hit)
 		local settings = Settings.get()
 		local radius = settings.radius
-		local erase = erasing()
+		local erase = Input.ctrl()
 		local look: Displacement.Look = { material = settings.paintMaterial, color = settings.paintColor, variant = settings.paintVariant }
-
-		-- Samples along the path since the last frame, so fast drags leave no gaps.
-		local samples = { hit.position }
-		local previous = lastCenter
-		if previous then
-			local distance = (hit.position - previous).Magnitude
-			local steps = math.clamp(math.ceil(distance / math.max(radius * STEP_SHARE, MIN_STEP)), 1, MAX_STEPS)
-			if steps > 1 then
-				samples = table.create(steps)
-				for k = 1, steps do
-					samples[k] = previous:Lerp(hit.position, k / steps)
-				end
-			end
-		end
-		local travel = if previous then (hit.position - previous).Magnitude else 0
+		local samples, travel = TriangleBrush.samples(lastCenter, hit.position, radius)
 		lastCenter = hit.position
 
-		local hitFace = hit.opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(hit.opened.disp))
-		for _, opened in Session.getAll(models) do
-			local pivot = opened.model:GetPivot()
-			if opened ~= hit.opened then
-				local faceNormal = pivot:VectorToWorldSpace(Displacement.faceNormal(opened.disp))
-				local nearest = pivot:PointToObjectSpace(hit.position)
-				local gap = (nearest - nearest:Max(opened.boundsMin):Min(opened.boundsMax)).Magnitude
-				if faceNormal:Dot(hitFace) < BACK_FACE_DOT or gap > radius + travel then
-					continue
-				end
-			end
-
+		for _, opened in TriangleBrush.tilesInReach(models, hit, radius, travel) do
 			local disp = opened.disp
-			local tileCenters = centersOf(opened)
-			local function inside(t: number): boolean
-				if opened == hit.opened and t == hit.triangle then
-					return true
-				end
-				local center = tileCenters[t]
-				for _, sample in samples do
-					if (center - sample).Magnitude <= radius then
-						return true
-					end
-				end
-				return false
-			end
-
-			local index: number? = 0
+			local target = 0
 			if not erase then
-				index = Displacement.lookIndex(disp, look)
+				local index = Displacement.lookIndex(disp, look)
 				if not index then
 					if not warned[opened] then
 						warned[opened] = true
@@ -230,27 +166,13 @@ return function(plugin: Plugin): () -> ()
 					end
 					continue
 				end
+				target = index
 			end
-			local target = index :: number
-
-			local changed: { number } = {}
-			for q = 0, Displacement.triangleCount(disp) // 2 - 1 do
-				local a, b = q * 2 + 1, q * 2 + 2
-				local inA, inB = inside(a), inside(b)
-				if not settings.paintFine and (inA or inB) then
-					inA, inB = true, true
-				end
-				if inA and disp.triLooks[a] ~= target then
-					disp.triLooks[a] = target
-					table.insert(changed, a)
-				end
-				if inB and disp.triLooks[b] ~= target then
-					disp.triLooks[b] = target
-					table.insert(changed, b)
-				end
-			end
+			local grids = TriangleBrush.gridTriangles(opened, hit, samples, radius, settings.paintFine, centersOf(opened))
+			local changed = TriangleBrush.write(opened, grids, target, function(g: number): boolean
+				return disp.triLooks[g] ~= Displacement.HOLE
+			end)
 			if #changed > 0 then
-				Session.updateLooks(opened, changed)
 				touched[opened] = true
 				local count = Displacement.lookCount(disp)
 				if count > LOOK_WARNING and not warned[opened] then
@@ -325,7 +247,7 @@ return function(plugin: Plugin): () -> ()
 		end
 		lastCenter = nil
 		local models = workingModels()
-		local hit = findHit(models)
+		local hit = TileHit.find(mouse, models)
 		if hit then
 			paintAt(models, hit)
 		end
@@ -343,7 +265,6 @@ return function(plugin: Plugin): () -> ()
 			edited += 1
 		end
 		table.clear(touched)
-		table.clear(centers)
 		table.clear(warned)
 		lastCenter = nil
 		ChangeHistoryService:FinishRecording(
@@ -360,6 +281,7 @@ return function(plugin: Plugin): () -> ()
 		if not state.coloring then
 			endStroke()
 			hideCursor()
+			table.clear(centers)
 			keyStrip.show(nil)
 			if state.autoBake then
 				task.spawn(Bake.bakeEdited)
@@ -374,22 +296,16 @@ return function(plugin: Plugin): () -> ()
 	table.insert(
 		connections,
 		mouse.Button2Down:Connect(function()
-			if Settings.get().coloring and not recording and isDown(Enum.KeyCode.LeftAlt, Enum.KeyCode.RightAlt) then
+			if Settings.get().coloring and not recording and Input.alt() then
 				pickLook()
 			end
 		end)
 	)
-	local function onWheel(direction: number)
-		if Settings.get().coloring and erasing() then
-			Settings.stepRadius(direction)
-		end
+	for _, connection in Input.connectResize(mouse, function()
+		return Settings.get().coloring
+	end, Settings.stepRadius) do
+		table.insert(connections, connection)
 	end
-	table.insert(connections, mouse.WheelForward:Connect(function()
-		onWheel(1)
-	end))
-	table.insert(connections, mouse.WheelBackward:Connect(function()
-		onWheel(-1)
-	end))
 	table.insert(
 		connections,
 		UserInputService.InputBegan:Connect(function(input)
@@ -411,7 +327,7 @@ return function(plugin: Plugin): () -> ()
 			if not settings.coloring then
 				return
 			end
-			local erase = erasing()
+			local erase = Input.ctrl()
 			local hints: { string }
 			if settings.pickingLook then
 				hints = { "<b>Pick a look</b>", "Click any part or tile", "Esc: Stop" }
@@ -432,23 +348,29 @@ return function(plugin: Plugin): () -> ()
 				return
 			end
 			local models = workingModels()
-			local hit = findHit(models)
+			local previewing = RadiusPreview.active()
+			local ray = if previewing then RadiusPreview.ray() else mouse.UnitRay
+			local hit = if ray then TileHit.findAlong(ray, models) else nil
 			if not hit then
 				hideCursor()
+				local position, facing = nil, nil
+				if previewing then
+					position, facing = RadiusPreview.fallback(settings.radius)
+				end
+				if position and facing then
+					-- No terrain in the middle of the view: show the size as a plain ring.
+					ring.CFrame = CFrame.lookAt(position, position + facing)
+					ring.Radius = settings.radius
+					ring.InnerRadius = settings.radius - math.max(0.15, settings.radius * 0.04)
+					ring.Color3 = PAINT_COLOR
+					ring.Visible = true
+					RadiusPreview.label(position, `Radius {formatStuds(settings.radius)} st`)
+				end
 				return
 			end
-			local normal = hit.normal
-			local up = if math.abs(normal.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
-			local frame = CFrame.lookAt(hit.position + normal * 0.05, hit.position + normal * 2, up)
-			local width = math.max(0.15, settings.radius * 0.04)
-			for _, adornment in { ring, ghost } do
-				adornment.CFrame = frame
-				adornment.Radius = settings.radius
-				adornment.InnerRadius = settings.radius - width
-				adornment.Color3 = if erase then ERASE_COLOR else settings.paintColor
-				adornment.Visible = true
-			end
-			ring.Transparency = if recording then 0.45 else 0.2
+			ring.Visible = false
+			drawOutline(models, hit, settings, erase)
+			RadiusPreview.label(if previewing then hit.position else nil, `Radius {formatStuds(settings.radius)} st`)
 
 			if recording then
 				paintAt(models, hit)
@@ -465,7 +387,7 @@ return function(plugin: Plugin): () -> ()
 			connection:Disconnect()
 		end
 		ring:Destroy()
-		ghost:Destroy()
+		outline.destroy()
 		keyStrip.destroy()
 	end
 end

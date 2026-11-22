@@ -10,7 +10,7 @@
 		Ctrl               invert (Raise <-> Lower)
 		Ctrl + click       Raise To: pick the height from the terrain under the cursor
 		Shift              smooth
-		Ctrl + scroll      resize the brush (Studio does not zoom the camera while Ctrl is held)
+		Ctrl + scroll      resize the brush (the camera is held still meanwhile, see Input)
 		Alt + drag         resize the brush too (right grows, left shrinks), like Hammer
 		Alt + right click  pick the paint axis from the face under the cursor, like Hammer
 		[ and ]            shrink and grow the brush, on layouts that have these keys
@@ -46,6 +46,8 @@ local Session = require(script.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Edges = require(script.Parent.Parent.Actions.Edges)
 local Bake = require(script.Parent.Parent.Actions.Bake)
+local Input = require(script.Parent.Input)
+local RadiusPreview = require(script.Parent.RadiusPreview)
 local KeyStrip = require(script.Parent.KeyStrip)
 
 type Opened = TerrainInstance.Opened
@@ -74,8 +76,6 @@ local MAX_STEPS = 16
 local SEAM_FRAMES = 2
 -- How quickly the ring's tilt follows the surface (higher is snappier).
 local NORMAL_FOLLOW = 24
--- Where the soft falloff is at half strength, as a share of the radius ((1 - u^2)^1.5 = 0.5).
-local HALF_STRENGTH = 0.61
 -- Alt+drag resize speed: the radius doubles for about every 70 pixels dragged right.
 local RESIZE_RATE = 0.01
 local SEPARATOR = KeyStrip.SEPARATOR
@@ -120,16 +120,12 @@ local function keyHints(mode: Paint.Effect, settings: Settings.State, effective:
 	return table.concat(parts, SEPARATOR)
 end
 
-local function isDown(a: Enum.KeyCode, b: Enum.KeyCode): boolean
-	return UserInputService:IsKeyDown(a) or UserInputService:IsKeyDown(b)
-end
-
 -- The tool after applying held modifier keys.
 local function effectiveMode(mode: Paint.Effect): Paint.Effect
-	if isDown(Enum.KeyCode.LeftShift, Enum.KeyCode.RightShift) then
+	if Input.shift() then
 		return "Smooth"
 	end
-	if isDown(Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl) then
+	if Input.ctrl() then
 		if mode == "Raise" then
 			return "Lower"
 		elseif mode == "Lower" then
@@ -188,17 +184,15 @@ return function(plugin: Plugin): () -> ()
 	local wasPainting = false
 
 	-- The ring is depth tested (true 3D occlusion); the faint ghost copy draws on top so the
-	-- brush stays readable inside valleys; the inner ring marks where a soft brush is at half
-	-- strength.
+	-- brush stays readable inside valleys. Both sit on the same circle, so they read as one.
 	local ring = newRing("StrataBrushCursor", false, 0.2)
 	local ghost = newRing("StrataBrushGhost", true, 0.78)
-	local inner = newRing("StrataBrushFalloff", false, 0.55)
 	local keyStrip = KeyStrip.new("StrataKeyHints")
 
 	local function hideCursor()
 		ring.Visible = false
 		ghost.Visible = false
-		inner.Visible = false
+		RadiusPreview.label(nil)
 	end
 
 	-- The displacements the brush works on: the selected ones (Hammer's behavior) or all.
@@ -211,8 +205,8 @@ return function(plugin: Plugin): () -> ()
 
 	-- The surface under the mouse: snapshots for tiles this stroke already reached, live wedges
 	-- for the rest, whichever is closer.
-	local function findHit(models: { Model }): Hit?
-		local ray = mouse.UnitRay
+	local function findHit(models: { Model }, aim: Ray?): Hit?
+		local ray = aim or mouse.UnitRay
 		local direction = ray.Direction.Unit
 		local filter: { Instance } = {}
 		for _, model in models do
@@ -434,14 +428,14 @@ return function(plugin: Plugin): () -> ()
 			return
 		end
 		-- Alt+drag resizes the brush instead of painting.
-		if isDown(Enum.KeyCode.LeftAlt, Enum.KeyCode.RightAlt) then
+		if Input.alt() then
 			resize = { startX = mouse.X, startRadius = settings.radius }
 			return
 		end
 		if
 			settings.mode == "RaiseTo"
-			and isDown(Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl)
-			and not isDown(Enum.KeyCode.LeftShift, Enum.KeyCode.RightShift)
+			and Input.ctrl()
+			and not Input.shift()
 		then
 			pickHeight()
 			return
@@ -523,31 +517,19 @@ return function(plugin: Plugin): () -> ()
 	table.insert(
 		connections,
 		mouse.Button2Down:Connect(function()
-			if Settings.get().painting and not recording and isDown(Enum.KeyCode.LeftAlt, Enum.KeyCode.RightAlt) then
+			if Settings.get().painting and not recording and Input.alt() then
 				pickAxis()
 			end
 		end)
 	)
 
-	-- Ctrl + scroll resizes. Plain scroll is left to Studio's camera zoom, which a plugin
-	-- cannot block; with Ctrl held Studio does not zoom.
-	local function onWheel(direction: number)
-		if Settings.get().painting and isDown(Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl) then
-			Settings.stepRadius(direction)
-		end
+	-- Ctrl + scroll resizes (Input holds Studio's camera still for it). Plain scroll is left to
+	-- the camera.
+	for _, connection in Input.connectResize(mouse, function()
+		return Settings.get().painting
+	end, Settings.stepRadius) do
+		table.insert(connections, connection)
 	end
-	table.insert(
-		connections,
-		mouse.WheelForward:Connect(function()
-			onWheel(1)
-		end)
-	)
-	table.insert(
-		connections,
-		mouse.WheelBackward:Connect(function()
-			onWheel(-1)
-		end)
-	)
 
 	table.insert(
 		connections,
@@ -586,12 +568,6 @@ return function(plugin: Plugin): () -> ()
 		-- dimmer when the grid widened the brush beyond its Radius.
 		local widened = radius > settings.radius + 1e-3
 		ring.Transparency = if recording then 0.45 elseif widened then 0.38 else 0.2
-		local soft = mode == "Smooth" or settings.falloff == "Soft"
-		inner.CFrame = frame
-		inner.Radius = radius * HALF_STRENGTH
-		inner.InnerRadius = radius * HALF_STRENGTH - width * 0.6
-		inner.Color3 = color
-		inner.Visible = soft
 	end
 
 	table.insert(
@@ -606,6 +582,8 @@ return function(plugin: Plugin): () -> ()
 
 			local resizing = resize
 			if resizing then
+				-- Alt + drag is also Studio's camera orbit; keep the camera still while resizing.
+				Input.holdCamera()
 				-- Exponential so small and large brushes resize at a comfortable speed.
 				local radius = resizing.startRadius * math.exp((mouse.X - resizing.startX) * RESIZE_RATE)
 				radius = math.round(radius * 2) / 2
@@ -623,6 +601,24 @@ return function(plugin: Plugin): () -> ()
 			end
 
 			local models = workingModels()
+			-- After a Radius change in the panel, show the brush in the middle of the view.
+			if RadiusPreview.active() and not recording then
+				local ray = RadiusPreview.ray()
+				local previewHit = if ray then findHit(models, ray) else nil
+				local text = `Radius {formatStuds(settings.radius)} st`
+				if previewHit then
+					placeCursor(previewHit.position, previewHit.normal, settings, mode, effectiveAt(previewHit, mode, settings))
+					RadiusPreview.label(previewHit.position, text)
+				else
+					local position, facing = RadiusPreview.fallback(settings.radius)
+					if position and facing then
+						placeCursor(position, facing, settings, mode, settings.radius)
+						RadiusPreview.label(position, text)
+					end
+				end
+				return
+			end
+			RadiusPreview.label(nil)
 			local hit = findHit(models)
 			if not hit then
 				hideCursor()
@@ -662,7 +658,6 @@ return function(plugin: Plugin): () -> ()
 		end
 		ring:Destroy()
 		ghost:Destroy()
-		inner:Destroy()
 		keyStrip.destroy()
 	end
 end

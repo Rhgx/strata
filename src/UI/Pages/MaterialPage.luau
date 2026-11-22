@@ -5,6 +5,7 @@ local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
+local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
 local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
@@ -62,7 +63,7 @@ local function MaterialPage(props: { settings: Settings.State })
 	local children: { [string]: unknown } = {
 		Title = Rows.title(1, "Material"),
 		Material = Rows.property(
-			4,
+			5,
 			"Material",
 			e(Dropdown, {
 				Items = MATERIAL_ITEMS,
@@ -86,7 +87,7 @@ local function MaterialPage(props: { settings: Settings.State })
 		),
 		Variant = variantRow(settings),
 		Color = e(ColorField, {
-			LayoutOrder = 6,
+			LayoutOrder = 7,
 			color = settings.paintColor,
 			tooltip = if settings.pickingLook
 				then "**Click any part or tile** in 3D to pick up its look.\n\n> The pipette again cancels."
@@ -107,7 +108,7 @@ local function MaterialPage(props: { settings: Settings.State })
 			end,
 		}),
 		Radius = Rows.property(
-			7,
+			8,
 			"Radius",
 			e(StudioComponents.NumericInput, {
 				Value = settings.radius,
@@ -119,14 +120,15 @@ local function MaterialPage(props: { settings: Settings.State })
 					Settings.update(function(s)
 						s.radius = value
 					end)
+					RadiusPreview.pulse()
 				end,
 			}),
 			"**Brush size** in studs.\n\n"
-				.. "The cell under the cursor is always painted, however small the brush.\n\n"
+				.. "The cell under the cursor is always included, however small the brush.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `[` and `]`."
 		),
 		Fine = Rows.checkbox(
-			8,
+			9,
 			"Fine (triangles)",
 			settings.paintFine,
 			function()
@@ -139,7 +141,7 @@ local function MaterialPage(props: { settings: Settings.State })
 				.. "> Edges follow the tile grid; raise `Detail` for smoother borders."
 		),
 		SelectedOnly = Rows.checkbox(
-			9,
+			10,
 			"Selected only",
 			settings.paintSelectedOnly,
 			function()
@@ -147,16 +149,16 @@ local function MaterialPage(props: { settings: Settings.State })
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
-			"**Limit painting** to selected tiles.\n\n"
-				.. "When off, paints any terrain under the cursor."
+			"**Limit the brush** to selected tiles.\n\n"
+				.. "When off, works on any terrain under the cursor."
 		),
-		StopDivider = Rows.divider(10),
+		StopDivider = Rows.divider(11),
 		Stop = Rows.button(
-			11,
+			12,
 			"Stop painting",
 			Settings.stopViewportTool,
-			"**Stop painting** materials and return to Studio.\n\n"
-				.. "Bakes painted tiles if `Bake automatically` is on.\n\n"
+			"**Stop the Material tool** and return to Studio.\n\n"
+				.. "Bakes edited tiles if `Bake automatically` is on.\n\n"
 				.. "> Shortcut: `Esc`.",
 			nil,
 			Icons.StopTool
@@ -164,13 +166,13 @@ local function MaterialPage(props: { settings: Settings.State })
 	}
 
 	if settings.pickingLook then
-		children.Hint = Rows.paragraph(3, "Click any part or tile in 3D to pick up its look.", "dimmed")
+		children.Hint = Rows.paragraph(4, "Click any part or tile in 3D to pick up its look.", "dimmed")
 	end
 	-- Say so when a drag would do nothing, instead of failing silently.
 	if #Session.models() == 0 then
-		children.Warning = Rows.paragraph(2, "No terrain yet. Select parts or use Pick faces.", "warning")
+		children.Warning = Rows.paragraph(3, "No terrain yet. Select parts or use Pick faces.", "warning")
 	elseif settings.paintSelectedOnly and #Query.selectedModels() == 0 then
-		children.Warning = Rows.paragraph(2, "No tiles selected. Select tiles or turn off Selected only.", "warning")
+		children.Warning = Rows.paragraph(3, "No tiles selected. Select tiles or turn off Selected only.", "warning")
 	end
 
 	return Rows.page(children)

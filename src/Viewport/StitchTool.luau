@@ -27,6 +27,7 @@ local Status = require(script.Parent.Parent.State.Status)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Edges = require(script.Parent.Parent.Actions.Edges)
 local Bake = require(script.Parent.Parent.Actions.Bake)
+local Input = require(script.Parent.Input)
 local KeyStrip = require(script.Parent.KeyStrip)
 
 type Opened = TerrainInstance.Opened
@@ -48,10 +49,6 @@ local TARGET_THICKNESS = 0.12
 local SOURCE_THICKNESS = 0.06
 
 local SEPARATOR = KeyStrip.SEPARATOR
-
-local function isDown(a: Enum.KeyCode, b: Enum.KeyCode): boolean
-	return UserInputService:IsKeyDown(a) or UserInputService:IsKeyDown(b)
-end
 
 local function formatReach(reach: number): string
 	return if reach == math.floor(reach) then tostring(reach) else string.format("%.1f", reach)
@@ -293,23 +290,11 @@ return function(plugin: Plugin): () -> ()
 
 	table.insert(connections, mouse.Button1Down:Connect(click))
 
-	local function onWheel(direction: number)
-		if Settings.get().stitching and isDown(Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl) then
-			Settings.stepReach(direction)
-		end
+	for _, connection in Input.connectResize(mouse, function()
+		return Settings.get().stitching
+	end, Settings.stepReach) do
+		table.insert(connections, connection)
 	end
-	table.insert(
-		connections,
-		mouse.WheelForward:Connect(function()
-			onWheel(1)
-		end)
-	)
-	table.insert(
-		connections,
-		mouse.WheelBackward:Connect(function()
-			onWheel(-1)
-		end)
-	)
 
 	table.insert(
 		connections,

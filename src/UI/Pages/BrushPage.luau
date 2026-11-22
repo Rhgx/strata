@@ -5,6 +5,7 @@ local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
+local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
 local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Icons = require(script.Parent.Parent.Icons)
@@ -56,8 +57,10 @@ local function BrushPage(props: { settings: Settings.State })
 				Settings.update(function(s)
 					s.radius = value
 				end)
+				RadiusPreview.pulse()
 			end),
 			"**Brush size** in studs.\n\n"
+				.. "The brush always reaches at least one grid step (set by `Detail`). Below that, a smaller radius pushes more gently.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
 		DirectionHeading = Rows.section(8, "Direction"),
