@@ -1,50 +1,50 @@
-<h1><img src="assets/logo/strata-store.png" alt="" width="40" align="absmiddle"> Strata</h1>
+<h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo/strata-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/logo/strata-light.svg"><img src="assets/logo/strata-light.svg" alt="" width="32" height="32" align="absmiddle"></picture> Strata</h1>
 
-Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement terrain built from `WedgePart` geometry. Each tile stores its editable displacement data in a `DispData` `Configuration` and bakes its wedges into a `UnionOperation` (one per painted look) for seamless material projection, so terrain models can be published like any normal Roblox model and reopened for editing later. This repository is private.
+Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement terrain built from `WedgePart` geometry. Each tile stores its editable data in a `DispData` `Configuration` and bakes into `UnionOperation` parts (one per look) for seamless material projection, so terrain models publish and reopen like normal Roblox models. This repository is private.
 
 ## Features
 
-- **Create terrain**: convert selected block `Part`s and wedges (`Top`, `Top + sides`, or `All faces`) into tiled displacements, or pick individual faces in the 3D view with the Pick faces tool.
-- **Sculpt**: shape terrain with `Raise`, `Lower`, `Smooth`, and `Raise To` brushes across tile boundaries, with Soft or Hard falloff, six movement axes (`Face normal`, `Up (Y)`, `X`, `Z`, `Picked`, and `Curved (Round)`), and viewport shortcuts (`Ctrl`, `Shift`, `Ctrl + Scroll`, `Alt + Drag`, `Alt + Right Click`).
-- **Stitch to parts**: snap tile edges onto nearby roads, floors, walls, wedge ramps, and floors built from wedges ("triangle terrain", matched as one outline) within a configurable reach, and keep stitched edges pinned across subsequent edits.
-- **Sew**: weld shared corners, 2:1 T-junctions, and edges between neighboring tiles manually or automatically after edits.
-- **Shape tiles**: change tile detail (power 2, 3, or 4: 5x5, 9x9, or 17x17 vertices), smooth base quads across seams with `Round` (Hammer's Subdivide), apply deterministic `Noise`, and `Split 2x2` losslessly into four smaller tiles one power lower.
-- **Paint materials**: paint a material, color and variant into parts of a tile with the `Material` tool (a road through grass, a rock patch on a slope), in whole grid cells or single triangles; `Ctrl` erases. Each look bakes into its own union, so painted areas keep their own texture.
-- **Mesh density and holes**: the `Mesh` tool's `Simplify` mode removes grid points so an area fills in with fewer, larger triangles (fine detail where the terrain bends, big triangles on flat ground): mark points, check the preview and triangle count, then `Apply`, with `Auto-simplify` marking the points on ground flatter than a `Max angle`; `Cut holes` deletes triangles for paths and openings. `Ctrl` restores either, losslessly.
-- **Appearance**: set tile `Material`, `Color` (RGB, HSV, Hex, and Studio's BrickColor palette), and `MaterialVariant`, or copy a look from any part or tile with the pipette tool.
-- **Bake and reopen**: merge wedges into a `UnionOperation` (automatically or on demand) with configurable `SmoothingAngle`, and bring wedges back automatically whenever a baked tile is edited again.
+- **Create terrain**: convert selected block and wedge parts into tiled displacements, or pick individual faces in 3D with `Pick faces`.
+- **Sculpt**: shape terrain across tile seams with `Raise`, `Lower`, `Smooth`, and `Raise To` brushes, configurable falloff, and multiple movement axes ([Hammer mapping](docs/hammer.md), [Panel UI](docs/ui.md)).
+- **Paint materials**: paint roads, paths, and surface patches onto tiles by grid cell or single triangle; each look bakes into its own union ([Data format](docs/data-format.md)).
+- **Stitch and sew**: snap tile edges onto nearby block or wedge parts (including wedge floors) and keep them pinned across edits, or weld seams between neighboring tiles automatically or on demand ([Hammer mapping](docs/hammer.md)).
+- **Shape tiles**: change tile detail (`Low 5x5`, `Medium 9x9`, `High 17x17`), smooth folded seams with `Round`, apply deterministic `Noise`, or `Split 2x2` losslessly into smaller tiles.
+- **Mesh density and holes**: simplify flat areas into fewer, larger triangles (manually or with `Auto-simplify`) and cut holes for paths or openings, with lossless restore ([Data format](docs/data-format.md)).
+- **Appearance**: change a tile's base `Material`, `Color`, or `MaterialVariant` without unbaking, or copy a look from any part or tile with the pipette ([Panel UI](docs/ui.md)).
+- **Bake and reopen**: merge wedges into unions automatically or on demand with configurable smoothing and bake optimizations, and restore wedges automatically on the next edit ([Baking](docs/baking.md)).
 
 ## Quick start
 
-### Installing the plugin
+### Install
 
 1. Build `Strata.rbxm` (see below) or copy a built `Strata.rbxm` into your local Roblox Studio Plugins folder.
 2. Restart Roblox Studio.
-3. Open the **Strata** panel from the **Plugins** ribbon tab; its tool strip holds all eight viewport tools. Turn on **Settings > Tools on Plugins ribbon** to also put them on the ribbon (all eight register plugin actions under `File > Advanced > Customize Shortcuts` either way).
+3. Open **Strata** from the **Plugins** ribbon tab. The panel's tool strip holds all eight viewport tools. Enable **Settings > Interface > Tools on Plugins ribbon** to mirror them on the ribbon (all eight also register actions under `File > Advanced > Customize Shortcuts`).
 
-### Developing and building
+### Build from source
 
-Strata uses [Aftman](https://github.com/LPGhatguy/aftman) for toolchain versions (`aftman.toml`: Rojo 7.7.1, Wally 0.3.2) and [Wally](https://wally.run) for Luau dependencies (`wally.toml`: React, ReactRoblox, StudioComponents, Lucide).
+Strata uses [Aftman](https://github.com/LPGhatguy/aftman) for toolchain versions (`aftman.toml`: Rojo 7.7.1, Wally 0.3.2) and [Wally](https://wally.run) for Luau packages (`wally.toml`: React, ReactRoblox, StudioComponents, Lucide).
 
 ```powershell
 aftman install
 wally install
 ```
 
-Build the plugin straight into your local Studio Plugins folder:
+Build straight into your local Studio Plugins folder (Studio loads new plugin files on restart):
 
 ```powershell
-# Build straight into the local Studio Plugins folder (Studio loads new plugin files on restart).
 rojo build --plugin Strata.rbxm
 ```
 
 ## Documentation
 
-Technical documentation for the codebase lives in [`docs/`](docs/README.md):
+Technical documentation lives in [`docs/`](docs/README.md):
 
-- [Documentation index](docs/README.md): overview of the docs and logo assets.
-- [Architecture](docs/architecture.md): one-way layer structure (`Core -> State -> Scene -> Actions -> Viewport -> UI`), module responsibilities, and plugin lifecycle.
-- [Data format and instance layout](docs/data-format.md): `DispData` attributes, vertex math, model hierarchy, and the `StrataDisplacement` tag.
-- [Baking](docs/baking.md): why tiles bake, the flat slab fast path, the anchor cube trick, two-step CSG, collision fidelity, and smoothing angle.
-- [Hammer mapping and deviations](docs/hammer.md): how Strata maps Valve Hammer displacement concepts and where it deliberately differs.
-- [Panel UI](docs/ui.md): context-driven panel layout, `Rows` helpers, tooltip markup, custom `Dropdown`, and `ColorPicker`.
+| Page | Covers |
+| --- | --- |
+| [Documentation index](docs/README.md) | Overview of pages and brand/icon assets |
+| [Architecture](docs/architecture.md) | Six-layer structure (`Core -> State -> Scene -> Actions -> Viewport -> UI`), module map, and plugin lifecycle |
+| [Data format](docs/data-format.md) | `DispData` attributes, vertex math, model layout, painted looks, holes, and mesh simplification |
+| [Baking](docs/baking.md) | Texture projection, flat slab fast path, anchor cube alignment, two-step CSG, and bake optimizations |
+| [Hammer mapping](docs/hammer.md) | Unit scale, Valve Hammer equivalents, Strata additions, and intentional deviations |
+| [Panel UI](docs/ui.md) | Panel layout, viewport shortcuts, color system, `Rows` helpers, `Dropdown`, and `ColorPicker` |
