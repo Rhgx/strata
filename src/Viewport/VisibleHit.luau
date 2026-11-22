@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Raycast helper that skips invisible BaseParts (triggers and hitboxes with Transparency >= 0.99)
 	up to MAX_SKIPS layers deep. Shared by click tools: Material pipette, Sample, Stitch, Pick

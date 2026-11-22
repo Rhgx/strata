@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Keyboard capture registry for panel controls that consume key presses directly (such as a
 	keyboard-navigated Dropdown). While any capture is held, Input.onKey yields keys to the

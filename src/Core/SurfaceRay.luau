@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Raycasts against displacement triangles using snapshotted vertex positions rather than live
 	wedges. Brushes snapshot each tile when a stroke first reaches it, cast against the snapshot,

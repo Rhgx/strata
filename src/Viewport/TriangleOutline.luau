@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Draws the outer boundary of shown triangles covered by triangle-based brushes (Material and
 	Mesh Cut holes). Outlining only perimeter edges accurately previews stepped cell footprints

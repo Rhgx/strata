@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Hammer-compatible displacement noise: adds deterministic value noise in [Min, Max] studs to
 	every vertex along its field vector (falling back to its offset normal when the field vector

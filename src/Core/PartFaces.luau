@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Extracts convertible quad faces from Roblox parts, matching Hammer's quad brush faces. Block
 	Parts provide 6 faces and wedges (WedgePart or Part with Wedge shape) provide 3 (bottom, back,

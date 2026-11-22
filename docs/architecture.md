@@ -1,114 +1,182 @@
 # Architecture
 
-Strata is organized into six one-way layers under `src/`. Each layer only requires modules from layers before it, keeping dependencies acyclic and separating pure geometry math from Studio state and React UI.
+Strata's six-layer module structure, plugin lifecycle, and Edit points internals.
+
+## Contents
+
+[Plugin lifecycle](#plugin-lifecycle) | [Layers and modules](#layers-and-modules) | [Edit points](#edit-points)
+
+## Layer order
+
+Modules under `src/` form six one-way layers. Each layer only requires modules from earlier layers, keeping dependencies acyclic and separating pure math from Studio state and React UI.
 
 ```text
 Core -> State -> Scene -> Actions -> Viewport -> UI
 ```
 
-`default.project.json` builds the plugin as a root `Folder` named `Strata` containing `Plugin` (`src/`) and `Packages` (`Packages/`, managed by Wally: `React`, `ReactRoblox`, `StudioComponents`, and `Lucide`).
+`default.project.json` builds a root `Folder` named `Strata` containing `Plugin` (`src/`) and `Packages` (`Packages/`, managed by Wally: React, ReactRoblox, StudioComponents, Lucide). `src/Version.luau` holds the plugin release version string.
 
-## Plugin lifecycle (`src/init.server.luau`)
+## Plugin lifecycle
 
-1. Calls `restoreSettings()` to load `plugin:GetSetting("StrataSettings")` into `State/Settings`. Viewport tools always start off; `pickedAxis` is stored as a 3-number JSON array `{ x, y, z }`.
-2. Creates the `StrataPanel` dock widget (`Enum.InitialDockState.Right`, 280x360 initial size, 220x200 minimum size, `ZIndexBehavior.Sibling`).
-3. Starts the background controllers: `Viewport/Toolbar`, `Scene/Session`, `Viewport/Activation`, `Viewport/BrushTool`, `Viewport/MaterialTool`, `Viewport/MeshTool`, `Viewport/RadiusPreview`, `Viewport/Input`, `Viewport/PickFaceTool`, `Viewport/StitchTool`, `Viewport/SampleTool`, and `Viewport/PointEditor`.
-4. Mounts `UI/App` into the dock widget via `ReactRoblox.createRoot` and `createPortal` only while `widget.Enabled` is true, so a closed panel does no work on Studio selection changes.
-5. Persisted settings are debounced (`0.3` s) on change, merging only modified keys into `plugin:GetSetting("StrataSettings")` so untouched tabs or Play sessions never clobber saved values. When the widget closes, stops any active viewport tool and Edit points, closes any open overlay, and flushes pending setting writes. On `plugin.Unloading`, flushes pending setting writes, unmounts the React root, and runs every controller's cleanup callback.
+Source: `src/init.server.luau`
+
+1. **Restore settings**: loads `plugin:GetSetting("StrataSettings")` into `State/Settings` (viewport tools always start off; `pickedAxis` deserializes from a 3-number JSON array).
+2. **Create dock widget**: builds `StrataPanel` (`InitialDockState.Right`, 280x360 initial, 220x200 minimum, `ZIndexBehavior.Sibling`).
+3. **Start controllers**: mounts `Viewport/Toolbar`, `Scene/Session`, `Viewport/Activation`, `BrushTool`, `MaterialTool`, `MeshTool`, `RadiusPreview`, `Input`, `PickFaceTool`, `StitchTool`, `SampleTool`, and `PointEditor`.
+4. **Mount panel on demand**: mounts `UI/App` via `ReactRoblox.createRoot` and `createPortal` only while `widget.Enabled` is true, so a closed panel ignores selection changes.
+5. **Persist settings**: debounces dirty setting keys (`0.3` s) and merges only changed keys into `StrataSettings`, so untouched tabs or Play sessions never clobber newer values.
+6. **Shut down**: closing the widget stops active tools/overlays and flushes pending setting writes. `plugin.Unloading` flushes writes, unmounts React, and runs every controller cleanup callback.
 
 ## Layers and modules
 
 ### `src/Core`
 
-Plain Luau geometry, math, and instance serialization. No React and no Studio UI.
+Pure Luau geometry, math, and serialization. No React and no Studio UI.
 
-| Module | Responsibility |
+| Module | Purpose |
 | --- | --- |
-| `Units.luau` | Stud-to-Hammer scale (`16` Hammer units per stud) and Y-up to Z-up coordinate conversion ([Hammer mapping](hammer.md)). |
-| `Displacement.luau` | Displacement data type, surface position math, checkerboard triangulation, edge/corner indexing, power resampling (`changePower`), lossless 2x2 `split`, and `DispData` serialization (`save`/`load`) ([Data format](data-format.md)). |
-| `WedgeBuilder.luau` | Splits each shown triangle along the altitude to its longest edge into two `WedgePart`s (`THICKNESS = 0.2` studs below the surface). Names wedges `"1"`, `"2"`, ... so strokes reuse parts in place, and unparents extra wedges instead of destroying them for undo safety. |
-| `TerrainInstance.luau` | Tile model lifecycle (`create`, `open`, `save`), `StrataDisplacement` tag, `adoptAppearance`, `ensureWedges`, `surfaces`, and CSG `bake` ([Baking](baking.md)). |
-| `PartFaces.luau` | Extracts quad faces from block `Part`s (6 faces) and wedges (3 faces: `Bottom`, `Back`, `Slope`; triangular sides skipped), filters `Top`/`TopSides`/`All` in world space, enforces `MIN_FACE_SIZE = 0.5` and `THIN_FACE_SIZE = 4`, and computes aligned tile counts across shared edges. |
-| `Paint.luau` | Spatial 3D sphere brushes (`Raise`, `Lower`, `Smooth`, `RaiseTo`), `Soft`/`Hard` falloff, six paint axes, `preview` (kept points inside the ring with falloff weights, or nearest kept points when empty), `gridSpacing`, spatial hash grid for neighbor smoothing, and `heightAt` height sampling. |
-| `Simplify.luau` | Finds removable vertices that preserve surface shape: `flatPoints` (greedy, one triangulation per candidate; used by the Mesh tool's `Select flat`) and `flatPointsQuick` (batch removal by angle or height tolerance plus straight-edge reduction and repair loop; used during baking). |
-| `Mesh.luau` | Builds a deterministic Delaunay triangulation of kept vertices on the flat grid (Bowyer-Watson from the 4 corners, ties broken toward Hammer's checkerboard diagonal), mapping each shown triangle to the grid triangles it covers and each removed point to its spot on the surface. |
-| `SurfaceRay.luau` | Two-sided Moller-Trumbore raycasting against snapshotted vertex positions so strokes stay anchored on the initial surface without walking toward the camera or slipping through wedge seams. |
-| `Sew.luau` | Welds shared corners (up to 16 faces), 2:1 T-junctions (up to 8 faces), and full or half edges (up to 3 faces) within 1 Hammer unit per axis. |
-| `Stitch.luau` | Matches tile edges against nearby block/wedge part edges within reach: drops interior edges shared by adjacent parts (matching wedge floors as one outline), filters edges whose side face faces back at the tile edge, handles bends, picks per vertex, and propagates snapped positions to coincident neighbor edges (`propagate`). `sheet` finds connected parts from a clicked part. |
-| `Subdivide.luau` | 4-pass Catmull-Clark style smoothing (Hammer's Subdivide, labeled `Round` in the UI) over selected flat base quads, writing `offsets`, `offsetNormals`, and `subdiv`. |
-| `Noise.luau` | Deterministic 3-octave value noise sampled from world positions in Hammer units and axes, applied along each vertex's field vector (or `offsetNormal` on untouched vertices). |
+| `Units.luau` | Stud-to-Hammer scale (`16` Hammer units/stud) and Y-up to Z-up conversion |
+| `Displacement.luau` | Displacement data model, surface math, resampling, split, and `DispData` IO |
+| `WedgeBuilder.luau` | Two-wedge triangle mesh builder (`THICKNESS = 0.2` studs below surface) |
+| `TerrainInstance.luau` | Tile lifecycle (`create`, `open`, `save`), naming, `adoptAppearance`, and CSG `bake` |
+| `PartFaces.luau` | Quad face extraction from blocks and wedges, filtering, and aligned tile counts |
+| `Paint.luau` | 3D sphere sculpt brushes, falloff, six paint axes, preview, and height sampling |
+| `Simplify.luau` | Flat-vertex removal (`flatPoints` for Mesh tool, `flatPointsQuick` for baking) |
+| `Mesh.luau` | Deterministic Bowyer-Watson Delaunay triangulation of kept vertices |
+| `SurfaceRay.luau` | Two-sided Moller-Trumbore raycasting against snapshotted triangles |
+| `Sew.luau` | Seam welding for corners, 2:1 T-junctions, and shared edges |
+| `Stitch.luau` | Part-edge matching, interior edge removal, inside-corner closing, and propagation |
+| `Subdivide.luau` | 4-pass Catmull-Clark style smoothing (labeled **Round folds** in the UI) |
+| `Noise.luau` | Deterministic 3-octave world-space value noise |
+
+Notes:
+- `WedgeBuilder` names wedges `"1"`, `"2"`, ... to reuse parts in place and unparents excess wedges instead of destroying them for undo safety.
+- `PartFaces` enforces `MIN_FACE_SIZE = 0.5` and `THIN_FACE_SIZE = 4` studs; triangular wedge sides are skipped.
+- `Sew` welds corners (up to 16 faces), 2:1 T-junctions (up to 8), and edges (up to 3) within 1 Hammer unit per axis.
 
 ### `src/State`
 
-Shared stores outside React so per-frame viewport tools read tool state directly without waiting for React renders.
+Shared stores outside React so per-frame viewport tools read state directly.
 
-| Module | Responsibility |
+| Module | Purpose |
 | --- | --- |
-| `Settings.luau` | Frozen `State` table with `get`, `update`, `subscribe`, `toggleTool`, `stopViewportTool`, `setEditingPoints`, `setOverlay`, `stepRadius`, and `stepReach`. Clamps numeric bounds and enforces mutual exclusion across the six mouse-owning modes (`painting`, `coloring`, `meshing`, `picking`, `stitching`, `sampling`) and `editingPoints`, which never takes the mouse and so is left running when Studio's own tools take it back. |
-| `KeyCapture.luau` | Tracks panel keyboard focus (such as an open `Dropdown`). While held, `Input.onKey` yields keys to the panel so `Esc` closes a list without stopping the active tool and `Enter` picks an item without triggering a viewport action. |
-| `Status.luau` | Latest operation status (`success`, `warning`, `error`, or `progress` with optional cancel callback) for the status bar. `success` expires after 6 seconds and `warning` after 10 seconds (both pause while hovering the status bar); `error` stays until dismissed or replaced. |
-| `Format.luau` | Shared formatting helpers for panel labels, status messages, and 3D overlays: comma-grouped counts, plurals, stud lengths (`Format.studs`), and color hex / `"R, G, B"` parsing. |
+| `Settings.luau` | Frozen settings store, bounds clamping, and tool mutual exclusion |
+| `KeyCapture.luau` | Tracks panel keyboard focus (e.g. open dropdowns) so viewport shortcuts yield |
+| `Status.luau` | Timed status messages (`success`, `warning`, `error`, `progress` with cancel) |
+| `Format.luau` | Shared formatting for counts, plurals, stud lengths, and hex/RGB colors |
+
+Notes:
+- `Settings` keeps the six mouse-owning modes (`painting`, `coloring`, `meshing`, `picking`, `stitching`, `sampling`) mutually exclusive while leaving `editingPoints` independent.
+- `Status` expires `success` after 6 s and `warning` after 10 s (pausing on status-bar hover up to a 20 s ceiling); `error` stays until dismissed.
 
 ### `src/Scene`
 
 Live place state and read-only scene queries.
 
-| Module | Responsibility |
+| Module | Purpose |
 | --- | --- |
-| `Session.luau` | Caches opened `TerrainInstance.Opened` handles per `Model`, provides spatial lookup helpers (`nearRadius`, `flatNeighbors`), tracks `dirty` tiles edited since their last bake with an `onChanged` signal, provides `updateWedges`, `updateMoved` (restores removed points moved by exact edits such as `Stitch` and `Round`), cancellable `bake` (including per-tile `rebake`), and `bakeDirty`, and validates cached handles per model on `ChangeHistoryService.OnUndo`/`OnRedo` (via `DispData`'s session-unique `Rev` attribute) and direct `DispData` attribute edits instead of clearing the whole cache. |
-| `Query.luau` | Read-only selection and spatial queries: `workingModels` (selected tiles when `Selected only` is on, otherwise all tiles), `displacementOf`, `selectedModels`, `selectedTiles`, `selectedParts`, `touchingParts`, `tilesNear`, `appearanceOf`, `selectionInfo`, and `placeInfo`. Resolves selections from a terrain area container, a tile model, or any child wedge/union. |
-| `MeshStage.luau` | Holds points staged in the Mesh tool's `Simplify` mode before `Apply`, with a cached preview triangulation per tile and before/after triangle counts. Clears on undo, redo, mode change, or tool stop. |
+| `Session.luau` | Tile cache, spatial lookups, dirty tracking, and cancellable bakes |
+| `Query.luau` | Read-only selection, adjacency, touching-part, and aggregate panel queries |
+| `MeshStage.luau` | Staged vertex marks and preview triangulation for **Mesh > Simplify** |
+
+Notes:
+- `Session` caches `TerrainInstance.Opened` per model and validates handles per model on undo/redo and direct Properties edits using `DispData`'s session-unique `Rev` attribute and attribute snapshot.
+- `Session.nearRadius` uses `GetPartBoundsInRadius` with a displaced-bounds fallback for hole tiles (`CanQuery = false`). `Session.flatNeighbors` matches by flat `Corner1..4` bounds across open vertical seams.
+- `Query` resolves selections from a terrain area container, a tile model, or any child wedge/union.
 
 ### `src/Actions`
 
-Undoable operations. Every action runs inside a single `ChangeHistoryService` recording.
+Undoable operations, each wrapped in a single `ChangeHistoryService` recording.
 
-| Module | Responsibility |
+| Module | Purpose |
 | --- | --- |
-| `Recording.luau` | Wraps actions in `ChangeHistoryService:TryBeginRecording` / `FinishRecording` (committing on success, cancelling and clearing `Session` on error) and runs `Recording.autoBake()` when `autoBake` is on and no tile-editing tool is active (`Settings.editing`: every tool except `Pick faces`, plus Edit points). Editing tools defer baking until the last one stops, avoiding bake/unbake churn when switching tools. |
-| `Create.luau` | Converts selected parts or picked faces into tiles, keeping custom part names or numbering generic conversions as `TerrainArea` / `TerrainTile` per parent. Enforces `MAX_TILES_PER_PART = 400`, yields every 8 tiles, removes source parts inside the recording, and bakes flat slabs immediately when `autoBake` is on. |
-| `Shape.luau` | Tile shape operations: `setDetail` (power change with pin remapping and optional autosew), `round` (`Subdivide`), `addNoise` (`Noise`), and `split` (lossless 2x2 split into four tiles one power lower). |
-| `Appearance.luau` | Lists part-compatible `Enum.Material` values (excluding `Air` and `Water`) and `MaterialService` variants; applies `Material`, `Color`, and `MaterialVariant` straight to `DispData` and visible parts without unbaking or rebaking (yielding every 2,000 parts on large unbaked selections); provides `copyFrom`, `clearPaint`, and `restoreHoles`. |
-| `Edges.luau` | `sewSelected`, `stitchSelected`, `previewStitch`, `stitchToPart`, `autosew`, `movePoints` (moves points to exact positions for Edit points, with coincident neighbor points following, 2:1 points interpolated, and simplified seams kept closed), `closeRemovedSeams` (pulls a neighbor's vertex onto a simplified tile's straight edge), `seamTwins`, and pin helpers (`pinsFor`, `propagatePins`, `restorePins` using `PIN_REACH = 0.1` studs) for `Keep edges stitched`. |
-| `Mesh.luau` | Two-phase simplification and point restoration: `selectFlat` (stages flat points within `Max angle` with yielding and abort checks), `markRestoreAll`, `applyMarks` (mirrors seam marks across neighbors and commits in one undo step), `restorePoints` (immediate restore from the Tiles page), `removePoints` (immediate removal when Edit points handles are deleted), `finish`, and `scope`. |
-| `Bake.luau` | `bakeSelected`, `bakeAll`, `rebakeAll` (rebakes every tile in one undo step so updated bake options apply), `unbakeSelected`, `applySmoothing` (updates `SmoothingAngle` on all baked unions in one undo step, skipping plain `Part` surfaces), and `bakeEdited` (auto-bakes dirty tiles when the last editing tool stops). Posts `Baking i of N...` progress, reports triangle savings via `report`, and refuses concurrent bakes. |
+| `Recording.luau` | `ChangeHistoryService` recording wrapper and deferred `autoBake` trigger |
+| `Create.luau` | Converts selected parts or picked faces into named tile areas or single tiles |
+| `Shape.luau` | Detail resampling, **Round folds**, **Noise**, **Reset shape**, and **Split 2x2** |
+| `Appearance.luau` | Base material/color/variant edits (without unbaking), pipette copy, clear paint, fill holes |
+| `Edges.luau` | **Sew tiles**, **Stitch**, part-edge pin helpers, seam twins, and **Edit points** moves |
+| `Mesh.luau` | Staged simplification (`selectFlat`, `applyMarks`), point removal, and restore |
+| `Bake.luau` | Selected/all/rebake/unbake actions, smoothing updates, and dirty-tile auto-bake |
+
+Notes:
+- `Recording.autoBake` defers baking while any editing tool is active, avoiding bake/unbake churn when switching tools.
+- `Create` keeps custom part names verbatim, numbers generic conversions as `TerrainArea` / `TerrainTile` per parent, enforces `MAX_TILES_PER_PART = 400`, and yields every 8 tiles.
+- `Edges.previewStitch` groups nearby tiles by face normal before calling `Stitch.sheet` so vertical tiles never break a floor corner's wall sheet.
 
 ### `src/Viewport`
 
-3D viewport interaction, adornments, keyboard shortcuts, and the Studio Plugins ribbon.
+3D viewport tools, adornments, keyboard shortcuts, and the Studio Plugins ribbon.
 
-| Module | Responsibility |
+| Module | Purpose |
 | --- | --- |
-| `Activation.luau` | Single owner of `plugin:Activate(true)` / `plugin:Deactivate()`, `mouse.Icon` updates, Studio tool-takeover sync (a `0.1` s grace window avoids stopping a newly clicked ribbon tool), and `Esc` handling via `Input.onKey`. |
-| `Toolbar.luau` | Creates the `Strata Terrain` Plugins ribbon toolbar (using the theme-switched logo; Studio hides toolbars whose name matches the plugin name) and registers `PluginAction`s for all eight tools and Edit points under `File > Advanced > Customize Shortcuts`. When `ribbonTools` is on, creates a `Strata Tools` group once per session (turning it off disables the buttons until Studio restarts, since Studio cannot remove ribbon buttons at runtime). |
-| `KeyStrip.luau` | Click-through Studio-themed `ScreenGui` in `CoreGui` showing active tool shortcuts at the bottom of the viewport. |
-| `BrushTool.luau` | Per-frame sculpt loop, `SurfaceRay` snapshots, brush cursor rings with `Paint.preview` point dots (and dimmed empty-ring state with nearest-point dots), multi-sample stroke paths, modifier keys, single-stroke undo recording (cancelling strokes whose points are all pinned to parts), autosew/pin restoration on mouse up, and `Bake.bakeEdited()` on stop. |
-| `MaterialTool.luau` | Paints looks into triangles under the brush (whole grid cells by default, single triangles with `Fine`), erases with `Ctrl`, picks looks with `Alt + Right Click` or the panel pipette, records one undo step per stroke, and calls `Bake.bakeEdited()` on stop. Never fills holes. |
-| `MeshTool.luau` | Runs `Simplify` (drag to stage points, click to toggle nearest point, preview new edges, commit via `Actions/Mesh.applyMarks`) and `Cut holes` (drag to delete or `Ctrl` to restore triangles, aiming via `SurfaceRay` with holes included and outlining hovered holes). |
-| `PickFaceTool.luau` | Raycasts eligible block/wedge faces, draws `BoxHandleAdornment` highlights (blue hover, amber picked), exposes `picks`/`clear`/`subscribe`, and creates tiles on `Enter` via `Create.createPicked`. |
-| `StitchTool.luau` | Raycasts eligible parts, renders hover previews (`SelectionBox`, green target lines, amber source lines), stitches on click (one undo step per click), and bakes on stop. |
-| `PointEditor.luau` | Edit points: one Ball handle per editable point of the chosen tiles (shared seam points share one; points removed by Simplify, all-hole points, and 2:1 midpoints get none), moved with Studio's own Select, Move, Rotate, and Scale tools. See [Edit points](#edit-points) below. |
-| `SampleTool.luau` | Pipette mode for the Tiles page: highlights hovered visible parts or tiles, copies `Material`, `Color`, and `MaterialVariant` onto selected tiles in one undo step, then exits. |
-| `Input.luau` | Shared viewport and panel input: modifier tracking while the panel has focus (transparent listener frame over the widget), unified `onKey` signal (skipping focused text boxes), `beginDragResize` / `dragRadius` for `Alt + Drag`, and `connectResize` for `Ctrl + Scroll` and `[` / `]` while holding Studio's edit camera still briefly. |
-| `RadiusPreview.luau` | Draws a ~1 second brush ring and `Radius N st` label at the center of the 3D view whenever `Radius` changes in the panel; ends immediately on mouse movement over the viewport. Provides `newRing` for tool cursors. |
-| `TriangleOutline.luau` | Draws the outer perimeter of the exact shown triangles a Material or Cut holes click will affect (blue to paint, red to erase or cut, green to restore). |
-| `Cursor.luau` | Holds the running tool's per-frame cursor hint (`resize`, `empty`, `valid`, `invalid`), cleared on tool switches and mapped to `mouse.Icon` by `Activation`. |
-| `TileHit.luau`, `TriangleBrush.luau`, `Lines.luau`, `VisibleHit.luau` | Shared viewport helpers: ray-to-tile/shown-triangle hit lookup, triangle brush coverage and look writes, pooled world-space line adornments, and first-visible-part raycasting (looking through invisible parts). |
+| `Activation.luau` | Owns `plugin:Activate`, `mouse.Icon`, tool takeover sync, and <kbd>Esc</kbd> handling |
+| `Toolbar.luau` | `Strata Terrain` ribbon toolbar, optional ribbon tools, and bindable `PluginAction`s |
+| `KeyStrip.luau` | Click-through viewport shortcut bar in `CoreGui` |
+| `BrushTool.luau` | Sculpt stroke loop, `SurfaceRay` aiming, brush ring, axis arrow, and live pins |
+| `MaterialTool.luau` | Grid-cell / triangle material painter, eraser, and look sampler |
+| `MeshTool.luau` | **Simplify** point staging and **Cut holes** triangle brush |
+| `PickFaceTool.luau` | Interactive part-face picker with hover and picked highlights |
+| `StitchTool.luau` | Interactive part-stitch hover preview and single-click stitch |
+| `PointEditor.luau` | **Edit points** handle lifecycle and Studio dragger sync |
+| `SampleTool.luau` | Tiles page pipette mode for copying appearance from any visible part |
+| `Input.luau` | Unified viewport and panel keyboard input, drag resize, and scroll resize |
+| `RadiusPreview.luau` | Temporary centered brush ring and label when **Radius** changes in the panel |
+| `TriangleOutline.luau` | Perimeter outline for triangles affected by **Material** or **Cut holes** |
+| `Cursor.luau` | Per-frame cursor hint state read by `Activation` |
+| `TileHit.luau`, `TriangleBrush.luau`, `Lines.luau`, `VisibleHit.luau` | Shared ray hit, triangle coverage, pooled line adornments, and visible-part raycast helpers |
 
 ### `src/UI`
 
-React-Lua dock widget panel built on `StudioComponents` and Lucide icons. See [Panel UI](ui.md) for layout, shortcuts, `Rows` helpers, tooltips, `Dropdown`, and `ColorPicker`.
+React-Lua dock widget panel built on `StudioComponents` and Lucide icons. See [Panel UI](ui.md).
 
 ## Edit points
 
-`Viewport/PointEditor` lets users move single points with Studio's own tools instead of a Strata brush. Its design follows from how Studio behaves (measured in Studio while building it):
+Source: `src/Viewport/PointEditor.luau`
 
-- **Handles are never saved or undone.** They live in a `StrataPoints` folder in `workspace`; folder and handles are not `Archivable`, so they never save into the place, and Studio leaves non-archivable parts out of undo history. Each rebuild fills a new unparented `Handles` folder and inserts it at once, so Studio (the Explorer in particular) handles one insertion instead of thousands.
-- **Every terrain change is our own recording.** Studio's draggers do not record; they call `ChangeHistoryService:SetWaypoint` when a drag ends, and plugin signals arrive deferred, so a drag's last frame can land after that waypoint. Writing unrecorded changes would therefore leak a frame into the next undo step, and a one-shot Properties edit would merge into the user's next action. Instead, handle `CFrame` changes mark handles dirty, and one `Heartbeat` flush per frame writes them inside `TryBeginRecording("Strata move points")`: the first flush of a burst commits a new step and later ones (within `0.35` s, while that step is still on top) append to it. With handles untracked, the dragger's own waypoint stays empty and adds no step. A busy recording (a bake, another action) leaves the handles dirty for the next frame.
-- **The terrain is authoritative.** On undo or redo, `Session` reopens tiles from `DispData` and the handles move back onto their points; a changed point layout (undo past `Detail`, `Simplify`, or `Restore points`, or a deleted tile) rebuilds them, keeping selected points selected.
-- **The pivot sits on the point.** Each Ball rests on the surface with `PivotOffset` putting its pivot on the point, and the point follows the pivot (always computed with the handle's own offset, so editing the pivot never moves a point). Studio's freeform drag rests a part's bounds on the surface under the cursor, so a handle centered on its point would climb with every mouse move over its own tile. Exact coordinates are under `Pivot > Origin` in Properties.
-- **Orientation is locked.** Each handle keeps a frame built from its tile: `up` is the face normal (averaged over the tiles sharing the point, so a seam handle sits outside both) and `right` follows the tile's first grid edge, so Local-space gizmos move along the tile normal and grid. Rotating a group still swings its points around the group's center. A handle that changed (rotation, `Size`, or `PivotOffset`) is put back once it has been still for `0.12` s, never mid-drag, so Studio's Rotate and Scale tools are not fought. A rotation that moved no point (a single handle, or `Orientation` in Properties, which turns a part around its center) is rejected: the point stays, the handle flashes red, and the status bar explains.
-- **Seams stay closed.** Points shared by edited tiles share a handle; neighbors outside the edit follow through `Edges.movePoints`, which reuses `Stitch.propagate` and `closeRemovedSeams`. Stitch pins and autosew are not applied, so a deliberate move is never snapped back.
-- **Deleting handles removes points.** Handles deleted with `Delete` or `Cut` are collected and removed through `MeshActions.removePoints` (the Mesh tool's Simplify, mirrored across seams), then the handles rebuild. Studio's Delete is still recording when the handles go, so the removal waits for that recording to finish (up to `5` s) and then appends to Studio's `DeleteSelectedAction` step, which Studio adds even for untracked handles: one `Ctrl + Z` brings the points back. A point that is a corner of any tile always stays and gets its handle back.
-- **The selection stays on handles.** A selection containing any handle is narrowed to handles only, so box selecting points never drags the terrain, a terrain area, or nearby parts with them. Grouping handles or moving them out of their folder rebuilds them; deleting the top folder ends Edit points. Removal events are matched against the current handles, never a flag, because deferred signals arrive after our own cleanup has finished.
-- **Limits.** At most `2500` handles at once. Ball size follows the grid spacing (`0.3` of it, clamped to `0.15` to `0.8` studs). In Team Create, other editors can see the handle folder while someone edits points.
+**Edit points** lets builders move or delete single vertices with Studio's own Select, Move, Rotate, and Scale tools. Its design works around how Studio draggers and undo recordings behave.
+
+### Handles are never saved or undone
+
+Handles live in a `StrataPoints` folder in `workspace` with `Archivable = false`, so they never save into the place or enter undo history. Rebuilds populate an unparented `Handles` folder and parent it in one call so Explorer avoids per-handle churn.
+
+> [!NOTE]
+> In Team Create, other editors can see the temporary handle folder while someone is in **Edit points**.
+
+### One undo step per drag
+
+Studio's draggers do not open a recording; they call `ChangeHistoryService:SetWaypoint` on drag end, and plugin property signals arrive deferred. Strata instead:
+
+1. Marks handles dirty when their `CFrame` changes.
+2. Flushes dirty handles once per `Heartbeat` inside `TryBeginRecording("Strata move points")`.
+3. Appends follow-up flushes within `0.35` s to the same step while it remains on top of the undo stack.
+
+If another recording (such as a bake) is running, handles stay dirty until the next frame.
+
+### Terrain is authoritative
+
+On undo or redo, `Session` reopens tiles from `DispData` and repositions handles onto their vertices. If the point topology changed (undo past **Detail**, **Simplify**, **Unsimplify**, or a deleted tile), handles rebuild while preserving selection.
+
+### Pivot placement and locked orientation
+
+- **Pivot on the point**: each Ball handle sits on the surface with `PivotOffset` placing its pivot on the exact vertex, so Studio's freeform drag does not climb over the tile. Exact coordinates are editable under **Pivot > Origin**.
+- **Orientation frame**: each handle stores a local frame (`up` = averaged face normal across shared tiles, `right` = first grid edge) so Local-space gizmos align with the surface.
+- **Settle check**: after `0.12` s without motion, rotation, `Size`, and `PivotOffset` reset cleanly without fighting active Rotate/Scale drags. Pure rotations that move no vertex (such as a single handle or Properties `Orientation`) are rejected with a red flash and status hint.
+
+### Seams and deleting points
+
+- **Closed seams**: shared vertices share one handle; neighbor tiles outside the edit follow through `Edges.movePoints` (`Stitch.propagate` + `closeRemovedSeams`) without applying stitch pins or autosew.
+- **Deleting handles**: <kbd>Delete</kbd> or <kbd>Cut</kbd> runs `MeshActions.removePoints` (mirrored across seams) after waiting up to `5` s for Studio's own `DeleteSelectedAction` recording to finish, then appends to it so one <kbd>Ctrl</kbd> + <kbd>Z</kbd> restores the points. Tile corners always stay.
+
+### Selection guard
+
+Any selection containing a handle is narrowed to handles only, preventing box selection from dragging terrain, a terrain area, or nearby parts. Grouping handles or moving them out of the folder triggers a rebuild; deleting the top folder exits **Edit points**.
+
+### Limits
+
+| Limit | Value |
+| --- | --- |
+| Maximum handles at once | `2,500` |
+| Handle radius | `0.3` of grid spacing, clamped to `0.15` to `0.8` studs |
+| Drag undo merge window | `0.35` s |
+| Orientation settle delay | `0.12` s |
+| Studio Delete recording wait | Up to `5` s |

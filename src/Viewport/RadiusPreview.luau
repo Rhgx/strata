@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shows a temporary 3D brush size preview when the user adjusts Radius in the panel (while the
 	pointer is off the viewport and PluginMouse stops updating). Displays the active tool's

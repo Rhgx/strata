@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Root panel layout: tool strip at the top, active page in the middle, status bar at the bottom.
 

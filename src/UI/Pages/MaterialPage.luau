@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Options page for the active Material tool: paint/erase mode, active look (material, variant,
 	color), recent looks strip, and brush settings.

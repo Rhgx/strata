@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Options page for the active sculpt brush (Raise, Lower, Smooth, or Raise To).
 ]]

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Builds and updates WedgeParts (2 per triangle) for a displacement. Wedges are named by their
 	1-based index ("1", "2", ...) so reopened models can reuse existing parts in place and brush

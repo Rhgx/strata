@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Reusable pool of always-on-top world-space BoxHandleAdornment line segments for viewport
 	previews (stitch guides, Mesh wireframes, brush outlines, and hole outlines). Call `clear`

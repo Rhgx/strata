@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Bottom status bar pinned to the panel: shows the latest operation result from State/Status
 	(or an idle hint for the active page) with full text in a hover tooltip, plus Settings and

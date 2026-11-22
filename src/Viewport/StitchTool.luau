@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Viewport Stitch tool: hover a block or wedge part to preview which displacement edges will
 	snap onto it, and click to stitch them. Each click is one undo step while the tool stays

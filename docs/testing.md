@@ -1,21 +1,21 @@
 # Testing
 
-Strata's unit test suite uses Jest-Lua (`roblox/jest@3.21.0` and `roblox/jest-globals@3.21.0`) to test pure `src/Core` geometry, math, and serialization logic inside Roblox Studio Edit mode.
+Running and writing Strata's dev-only Jest-Lua unit test suite in Roblox Studio Edit mode.
 
-## Overview and layout
+## Overview
 
-The suite is strictly dev-only and never ships in `Strata.rbxm`:
+The suite uses `roblox/jest@3.21.0` and `roblox/jest-globals@3.21.0` to test pure `src/Core` geometry, math, and serialization logic. It never ships in `Strata.rbxm`:
 
-- `wally.toml` lists `Jest` and `JestGlobals` under `[dev-dependencies]`, which Wally installs into `DevPackages/` (gitignored).
-- `default.project.json` includes only `Plugin` (`src/`) and `Packages` (`Packages/`), so `tests/` and `DevPackages/` are excluded from plugin builds.
-- `test.project.json` builds a separate `Folder` named `StrataTests` containing `Plugin` (`src/`), `Packages` (`Packages/`), `DevPackages` (`DevPackages/`), and `Tests` (`tests/`).
+- `wally.toml` lists Jest packages under `[dev-dependencies]` (installed into gitignored `DevPackages/`).
+- `default.project.json` packages only `src/` and `Packages/`.
+- `test.project.json` builds a separate `StrataTests` folder containing `Plugin`, `Packages`, `DevPackages`, and `Tests`.
 
 ```text
 tests/
-  jest.config.luau      # Jest configuration (testMatch = { "**/*.spec" })
-  run.luau              # Entry point: runs Jest over Tests, prints report, returns (passed, failed)
+  jest.config.luau      # testMatch = { "**/*.spec" }
+  run.luau              # Runs Jest over Tests, prints report, returns (passed, failed)
   Helpers/
-    Tiles.luau          # Unparented arena Folder, wedge-free tiles, blocks, and vertex helpers
+    Tiles.luau          # Unparented arena, wedge-free tiles, blocks, vertex helpers
   Core/
     Displacement.spec.luau
     Paint.spec.luau
@@ -25,62 +25,61 @@ tests/
     Units.spec.luau
 ```
 
-`tests/run.luau` invokes `Jest.runCLI` over `Root.Tests` with `{ verbose = true, ci = false }`, prints Jest's report in Output, returns `(passed, failed)`, and raises an error if Jest fails to finish or any test or suite fails.
-
-Tests never parent anything to `workspace` and leave the open place untouched.
+Specs never parent anything to `workspace` and leave the open place untouched.
 
 ## Running the suite
 
-`debug.loadmodule` is available in Roblox Studio, so no FastFlag changes are needed.
+`debug.loadmodule` is available in Roblox Studio without FastFlag changes.
 
-1. Install dependencies once (and again after changing `wally.toml`):
+1. Install dependencies once (and after changing `wally.toml`):
 
    ```powershell
    wally install
    ```
 
-2. Build the test model (any output path works; `*.rbxm` is gitignored):
+2. Build the test model (`*.rbxm` is gitignored):
 
    ```powershell
    rojo build test.project.json -o tests.rbxm
    ```
 
-3. Open any place in Roblox Studio in Edit mode and insert `tests.rbxm` (for example, right-click `ServerStorage` and select **Insert from File...**).
-4. Run the suite from the Command Bar:
+3. Open any place in Studio Edit mode and insert `tests.rbxm` into `ServerStorage` (**Insert from File...**).
+4. Run from the Command Bar:
 
    ```luau
    require(game.ServerStorage.StrataTests.Tests.run)()
    ```
 
-   Jest's report prints in the **Output** window.
+   Jest prints its report in the **Output** window and raises an error if any test fails.
 
-5. Before running again after editing source or spec files, delete the inserted `StrataTests` folder, rebuild `tests.rbxm`, and insert the fresh copy. Luau's `require` caches modules for the Studio session, so re-running against an already-required copy executes the old code.
+> [!IMPORTANT]
+> Luau's `require` caches modules for the Studio session. After editing source or specs, delete `StrataTests`, rebuild `tests.rbxm`, and insert the fresh copy before running again.
 
 ## Adding a spec
 
-### Location and naming
+### Location and structure
 
-Place spec files under `tests/` mirroring `src/` (for example, `tests/Core/MyModule.spec.luau`). `tests/jest.config.luau` matches `**/*.spec`, and Rojo strips the `.luau` extension when building `StrataTests`.
+Place spec files under `tests/` mirroring `src/` (for example `tests/Core/MyModule.spec.luau`). Start with `--!strict`, include the standard copyright/SPDX header, resolve `Root` relative to `script`, and require `JestGlobals` from `Root.DevPackages.JestGlobals`.
 
-Start each file with `--!strict`, resolve `Root` relative to `script`, require `JestGlobals` from `Root.DevPackages.JestGlobals`, and require the module under test from `Root.Plugin`.
+### `Tiles` helper
 
-### Using the `Tiles` helper and arena cleanup
+Source: `tests/Helpers/Tiles.luau`
 
-`tests/Helpers/Tiles.luau` provides throwaway geometry helpers for specs that need tiles or parts:
-
-| Helper | Behavior |
+| Helper | Purpose |
 | --- | --- |
-| `Tiles.arena()` | Creates a `Folder` named `StrataTestArena` with `Parent = nil` so specs never touch `workspace`. |
-| `Tiles.flat(arena, origin, size, power)` | Creates a flat square tile `size` studs wide on the XZ plane facing up, with its first corner at `origin` and `skipWedges = true` (no `WedgePart`s are created; `Core` reads only `disp`, the pivot, and bounds). |
-| `Tiles.block(arena, min, max)` | Creates an anchored block `Part` spanning world corners `min` and `max` inside `arena`. |
-| `Tiles.world(opened, v)` | Returns the current world position of vertex `v`. |
-| `Tiles.vertexAt(opened, point)` | Returns the vertex index whose undisplaced world position matches `point` (within `1e-3`), or `nil`. |
-| `Tiles.move(opened, v, point)` | Moves vertex `v` to world position `point`. |
+| `Tiles.arena()` | Unparented `Folder` (`StrataTestArena`) that never touches `workspace` |
+| `Tiles.flat(arena, origin, size, power)` | Flat upward square tile (`skipWedges = true`) |
+| `Tiles.block(arena, min, max)` | Anchored block `Part` spanning world corners `min`..`max` |
+| `Tiles.world(opened, v)` | Current world position of vertex `v` |
+| `Tiles.vertexAt(opened, point)` | Vertex index matching flat world `point` (within `1e-3`) |
+| `Tiles.move(opened, v, point)` | Moves vertex `v` to world position `point` |
 
-Create a fresh arena in `beforeEach` and destroy it in `afterEach` so instances never leak between tests:
+Create a fresh arena in `beforeEach` and destroy it in `afterEach`:
 
 ```luau
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 
 local Root = script.Parent.Parent.Parent
 
@@ -120,13 +119,9 @@ describe("Sew", function ()
 end)
 ```
 
-### Contract-first assertions
+### Guidelines
 
-Write assertions from the module's intended contract, not by copying whatever the current implementation happens to return. Check geometric invariants, round-trip fidelity, edge cases, and boundary conditions (such as seams closing within tolerance, corners never being removed, or out-of-reach parts producing zero matches). When fixing a bug, add a regression test that fails against the broken code and passes with the fix.
-
-## What not to do in unit tests
-
-- **No CSG bakes.** Do not call `TerrainInstance.bake` or `GeometryService` (`UnionAsync`, `SubtractAsync`). CSG is slow, yields, and belongs to manual verification in Studio.
-- **No `workspace`.** Never parent test tiles, parts, or folders to `workspace`. `Scene/Session` scans `workspace`, parenting triggers Studio rendering work, and tests must leave the open place untouched.
-- **No `ChangeHistoryService`.** Do not open recordings, set waypoints, or mutate the place's undo stack in unit tests.
-- **Keep tests synchronous.** Avoid `task.wait`, yielding loops, or event-timing dependencies; unit tests should run straight through without yielding.
+- **Contract-first assertions**: test geometric invariants, round-trip fidelity, and boundary conditions rather than mirroring implementation details. Add a failing regression test for every bug fix.
+- **No CSG bakes**: never call `TerrainInstance.bake` or `GeometryService`; CSG yields and belongs to manual Studio verification.
+- **No `workspace` or `ChangeHistoryService`**: keep tests isolated from the live place and undo stack.
+- **Keep tests synchronous**: avoid `task.wait` or yielding loops.

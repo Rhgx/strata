@@ -1,110 +1,110 @@
 # Baking
 
-While a tile is being edited, Strata renders it as `WedgePart`s: 2 wedges per shown triangle (64 wedges at `Low`, 256 at `Medium`, 1,024 at `High`), each `0.2` studs thick hanging below the surface (`src/Core/WedgeBuilder.luau`). Baking merges a tile into a `UnionOperation` named `Surface`, plus one `Surface_<k>` union per painted look (`src/Core/TerrainInstance.luau`).
+How Strata merges editing wedges into continuous `UnionOperation` surfaces, aligns textures across tiles, and optimizes baked geometry.
+
+## Contents
+
+[Why tiles bake](#why-tiles-bake) | [Pipeline at a glance](#pipeline-at-a-glance) | [Baking steps](#baking-steps) | [Bake optimizations](#bake-optimizations) | [Smoothing and triggers](#smoothing-and-triggers)
 
 ## Why tiles bake
 
-Roblox projects material textures in each `BasePart`'s local coordinate space. Because each triangle's wedges have different sizes and orientations, textures break and rotate from triangle to triangle on unbaked tiles. Baking into one union per look gives each surface a single continuous texture projection and cuts the runtime instance count dramatically.
+While editing, each tile renders as 2 `WedgePart`s per shown triangle (64 at Low, 256 at Medium, 1,024 at High), `0.2` studs thick below the surface (`src/Core/WedgeBuilder.luau`). Because Roblox projects material textures in each part's local space, textures rotate and break across unbaked wedges.
 
-Whenever a baked tile is edited again, `TerrainInstance.ensureWedges` automatically unparents every `Surface` part and regenerates the wedges (with each triangle's look) from `DispData`.
+Baking (`src/Core/TerrainInstance.luau`) merges each look on a tile into one union (`Surface` for the base look, `Surface_<k>` per painted look) for continuous texture projection and far fewer runtime instances. Editing a baked tile automatically restores wedges from `DispData`.
 
-## Baking pipeline (`TerrainInstance.bake`)
+## Pipeline at a glance
+
+1. **Sync Studio edits**: save any Properties or Material Manager edits back into `DispData`.
+2. **Group by look**: split non-hole triangles by look and apply optional bake simplification to a temporary copy.
+3. **Flat slab fast path**: replace flat rectangular single-look tiles with one temporary slab instead of wedges.
+4. **Anchor cube alignment**: pass a tiny unparented pivot-aligned cube first so `UnionAsync` locks texture axes.
+5. **Two-step CSG**: union with `Box` collision, check for collapse, then subtract the anchor with `PreciseConvexDecomposition`.
+6. **Swap and save**: apply material/smoothing properties and unparent old wedges for undo safety.
+
+## Baking steps
+
+Source: `TerrainInstance.bake` in `src/Core/TerrainInstance.luau`
 
 ### 1. Sync Studio edits
 
-`TerrainInstance.adoptAppearance` runs first so any `Material`, `Color`, or `MaterialVariant` edits made through Studio's Properties window or Material Manager are written into `DispData` before CSG runs.
+`TerrainInstance.adoptAppearance` captures any `Material`, `Color`, or `MaterialVariant` edits made directly in Studio before CSG runs.
 
 ### 2. Group triangles by look
 
-Triangles are grouped by their displayed look (`DispData` `TriLooks`): look `0` (the tile's base look) and each painted look.
+Triangles are grouped by displayed look (`0` for base look, `1..35` for painted looks):
 
-- Holes belong to no group and are omitted. A flat tile with holes skips the flat slab fast path, and a tile whose every triangle is a hole bakes nothing.
-- If bake optimizations are enabled (see below), flat points are removed from a temporary copy before building temporary wedges for CSG; the tile's saved `DispData` always keeps full detail for future edits.
-- Every look group bakes into its own union sharing the same anchor cube, so textures align across painted borders as well as across neighboring tiles.
-- If any group fails, any unions already created are destroyed and the tile's wedges are restored.
+- Holes belong to no group and are omitted. All-hole tiles bake nothing.
+- When bake optimizations are enabled, flat points are removed on a temporary copy before building temporary CSG wedges.
+- Every look group shares the same anchor cube so textures align across painted borders and neighboring tiles.
+- If any group fails, unions already built for that tile are destroyed and wedges are restored.
 
 ### 3. Flat slab fast path
 
-For a tile showing a single look with no holes, `flatSlab` checks whether the tile is still flat and rectangular before creating wedges:
+For a single-look tile with no holes, `flatSlab` checks that every vertex has `distance <= 1e-4` and `offset.Magnitude <= 1e-4` (`FLAT_EPSILON`) and that the four corners form a rectangle.
 
-- Every vertex has `distance <= 1e-4` and `offset.Magnitude <= 1e-4` (`FLAT_EPSILON`, above the `1e-5` length produced by `Displacement.normalizeWithLength` for zero vectors).
-- The four base corners form a rectangle within tight dot-product and corner-closure tolerances.
-
-When both hold, Strata builds one unparented temporary `Part` matching the rectangle's size and `WedgeBuilder.THICKNESS` (`0.2` studs) below the surface. Every newly created tile starts flat, and unioning one slab runs roughly 70x faster than unioning 64 to 1,024 wedges while producing identical geometry. During `Create` (`src/Actions/Create.luau`) with `Bake automatically` on, wedges are skipped completely (`skipWedges = true`) unless baking fails.
-
-For sculpted, painted, or non-rectangular tiles, `ensureWedges` builds the needed wedges and passes them to CSG.
+When true, Strata builds one unparented `Part` matching the rectangle and thickness (`0.2` studs). Unioning one slab runs ~70x faster than unioning 64 to 1,024 wedges. During **Create** with **Bake automatically** enabled, wedges are skipped entirely (`skipWedges = true`) unless baking fails.
 
 ### 4. Anchor cube alignment
 
-A `UnionOperation` inherits its `CFrame` (and local texture projection origin and axes) from the first part passed to `GeometryService:UnionAsync`. Passing the first wedge would project textures at different angles and offsets on neighboring tiles.
+`UnionOperation` inherits its `CFrame` (and texture projection axes) from the first part passed to `GeometryService:UnionAsync`. To lock alignment across tiles:
 
-To lock texture alignment across tiles:
+1. Find the lowest displaced vertex along `faceNormal` and triangle 1's centroid.
+2. Create an unparented `0.05`-stud cube using `model:GetPivot().Rotation`, placed `1.2` studs (`THICKNESS + ANCHOR_DEPTH`) below the lowest vertex.
+3. Pass the cube first to `UnionAsync`. Keeping it clear of the surface avoids a CSG collapse bug where an overlapping anchor returns only the cube.
 
-1. Strata computes the centroid of triangle 1 and finds the lowest displaced vertex along `faceNormal`.
-2. It creates a tiny unparented cube (`ANCHOR_SIZE = 0.05` studs) with `model:GetPivot().Rotation`, placed at `lowest - WedgeBuilder.THICKNESS - ANCHOR_DEPTH` (`1.2` studs below the lowest vertex along `faceNormal`).
-3. Passing this cube first to `UnionAsync` locks the union's `CFrame` to the tile's pivot rotation and corner-relative origin.
-4. Keeping the cube strictly clear of the surface avoids a Roblox CSG failure mode where an overlapping anchor causes `UnionAsync` to collapse and return only the cube.
-
-All helper parts (`anchor`, `cutter`, and any `slab`) stay unparented so they never enter `workspace` or Studio's undo history.
+All helper parts stay unparented so they never enter `workspace` or undo history.
 
 ### 5. Two-step CSG and collision fidelity
 
-Each look group runs a two-step CSG sequence:
-
-1. **Intermediate union (`Box` collision)**: calls `GeometryService:UnionAsync(anchor, parts, { CollisionFidelity = Enum.CollisionFidelity.Box, RenderFidelity = Enum.RenderFidelity.Precise, SplitApart = false })`. Skipping convex decomposition on this discarded intermediate saves roughly a quarter to half of bake time.
-2. **Collapse check**: verifies `result.Size.Magnitude >= expectedExtent * 0.5`, where `expectedExtent` is the diagonal of the group's vertex bounds (so small painted patches pass). If the union fails or collapses, wedges stay intact and an error is raised.
-3. **Subtract anchor cube (`PreciseConvexDecomposition`)**: removes the anchor cube via `GeometryService:SubtractAsync` using a 3x larger cube (`0.15` studs) at the same `CFrame`, with `CollisionFidelity = Enum.CollisionFidelity.PreciseConvexDecomposition`, `RenderFidelity = Enum.RenderFidelity.Precise`, and `SplitApart = false`. The result keeps the anchor cube's `CFrame`.
-4. **Fallback**: if `SubtractAsync` fails or collapses, Strata re-runs `UnionAsync` directly with `PreciseConvexDecomposition` so the tile never ships with `Box` collision (leaving the harmless `0.05`-stud speck below the surface).
+1. **Intermediate union (`Box`)**: runs `UnionAsync` with `CollisionFidelity.Box`, `RenderFidelity.Precise`, and `SplitApart = false`, saving ~25 to 50% of bake time on the discarded intermediate.
+2. **Collapse check**: verifies `result.Size.Magnitude >= expectedExtent * 0.5`. If collapsed, wedges stay intact and an error is raised.
+3. **Subtract anchor (`PreciseConvexDecomposition`)**: removes the anchor using a `0.15`-stud cutter at the same `CFrame` while keeping its texture alignment.
+4. **Fallback**: if `SubtractAsync` fails or collapses, Strata runs `UnionAsync` directly with `PreciseConvexDecomposition` so a tile never ships with `Box` collision.
 
 ### 6. Final properties and undo safety
 
-Each resulting `UnionOperation` receives:
+Each resulting `UnionOperation` gets `Name = "Surface"` (or `Surface_<k>`), `Anchored = true`, `CanTouch = false`, `UsePartColor = true`, its look's appearance, and `SmoothingAngle`. Old wedges are unparented (`Parent = nil`) rather than destroyed so <kbd>Ctrl</kbd> + <kbd>Z</kbd> restores them intact.
 
-- `Name = "Surface"` for the base look, or `Surface_<k>` for painted look `k`
-- `Anchored = true`, `CanTouch = false`, `UsePartColor = true`
-- `Material`, `Color`, and `MaterialVariant` from its look in `DispData`
-- `SmoothingAngle = smoothingAngle`
+## Bake optimizations
 
-Existing wedges are unparented (`part.Parent = nil`) rather than destroyed so `ChangeHistoryService` undo restores them intact. If a bake fails after a simplified copy, slab, or rebake left a tile without wedges, Strata regenerates its wedges before reporting the error.
+Settings under **Settings > Baking > Optimization** are passed as `BakeOptions`.
 
-## Bake optimizations (`Settings > Baking > Optimization`)
-
-`Session.bake` passes these settings to `TerrainInstance.bake` as `BakeOptions`. All of them affect only the baked geometry; saved `DispData` always retains full edit detail.
+> [!NOTE]
+> Bake optimizations only simplify the baked surface geometry. Saved `DispData` always keeps full grid detail for future edits.
 
 | Setting | State key | Default | Range | Effect |
 | --- | --- | --- | --- | --- |
-| `Simplify` | `bakeSimplifyAngle` | `1` deg | `0` to `10` (`0` = off) | Removes interior vertices whose grid triangles agree within this angle (`Simplify.flatPointsQuick`). |
-| `Tolerance` | `bakeHeightTolerance` | `0.05` st | `0` to `0.5` (`0` = off) | Also removes interior vertices within this distance of the plane through their four neighbors, catching noise and minor brush wobble. |
-| `Simplify straight edges` | `bakeSimplifyEdges` | On | Boolean | Runs Ramer-Douglas-Peucker (`0.005` stud tolerance) along each tile edge, split at corners and painted borders, keeping T-junctions crack-free. |
-| `Plain Part for flat tiles` | `bakeFlatPart` | Off | Boolean | Keeps a flat slab as a plain `Part` (`Surface` or `Surface_<k>`) instead of unioning it. Off by default because a `Part`'s texture origin can differ from neighboring unions. |
-| `No shadow on flat tiles` | `bakeFlatNoShadow` | Off | Boolean | Sets `CastShadow = false` on baked surfaces whose grid triangles all lie within `max(Simplify, 1)` deg of the face and whose vertices stay within `max(Tolerance, 0.001)` st of one height. Off by default so tunnels or structures under flat ground stay shaded. |
+| **Simplify** | `bakeSimplifyAngle` | `1` deg | `0` to `10` | Omits interior points flatter than this angle |
+| **Tolerance** | `bakeHeightTolerance` | `0.05` st | `0` to `0.5` | Omits interior points within this height of neighbors |
+| **Simplify straight edges** | `bakeSimplifyEdges` | On | Boolean | Ramer-Douglas-Peucker (`0.005` st) along straight edges |
+| **Plain Part for flat tiles** | `bakeFlatPart` | Off | Boolean | Keeps flat single-look slabs as a plain `Part` |
+| **No shadow on flat tiles** | `bakeFlatNoShadow` | Off | Boolean | Sets `CastShadow = false` on flat baked tiles |
+
+Defaults note:
+- **Plain Part for flat tiles** is off by default because a plain `Part`'s texture origin can differ from adjacent unions (when aligned with the tile pivot, Strata matches rotation and permutes size to align axes).
+- **No shadow on flat tiles** is off by default so tunnels or interiors beneath flat ground stay shaded.
 
 ### Repair loop and guarantees
 
-After `Simplify.flatPointsQuick` removes candidate vertices, a repair loop builds the triangulation and checks every new shown triangle against the original surface:
+After `Simplify.flatPointsQuick` marks candidates, a repair loop checks every resulting shown triangle against the original surface:
 
-- A triangle passes if it bends no more than `Simplify` degrees from every grid triangle under it, or if every original vertex under it lies within the height allowance (`Tolerance`, or at least `0.005` studs when straight-edge simplification is on).
-- For each failing triangle, the removed vertex underneath it that strays farthest is restored. Because every check compares against the original surface, error never accumulates across passes.
-- Triangles already shown due to manual Mesh tool simplification are exempt, so tiles simplified at a wider angle still benefit from bake optimizations.
-- Corners, painted borders, and hole outlines are always preserved.
-- If the loop does not settle within 24 passes, the tile bakes at full detail. Otherwise, its final triangulation is reused directly to build the temporary CSG wedges.
+- A triangle passes if it stays within **Simplify** degrees of every covered grid triangle, or every covered vertex stays within **Tolerance** (at least `0.005` st with straight-edge simplification on).
+- Failing triangles restore their farthest removed vertex. Comparing against the original surface prevents error accumulation.
+- Corners, painted borders, and hole outlines are always preserved; manually simplified triangles are exempt.
+- If the loop does not settle within 24 passes, the tile bakes at full detail.
 
-On a half-flat `High` tile, `Simplify` alone cuts 512 triangles to 208 and more than halves bake time; on a noisy sloped tile, `Simplify`, `Tolerance`, and `Simplify straight edges` together reduced 128 triangles to 27 and cut bake time from 0.18 s to 0.06 s.
+### Measured savings
 
-When `Plain Part for flat tiles` is enabled and the slab aligns with the tile pivot's axes, the `Part` inherits the pivot's rotation (with its size permuted to match) so texture axes match neighboring unions. `TerrainInstance.surfaces` accepts both `Part` and `UnionOperation`, and `Bake.applySmoothing` skips plain `Part`s.
+| Tile | Options | Triangles | Bake time |
+| --- | --- | --- | --- |
+| Half-flat High tile | **Simplify** alone | 512 -> 208 | > 2x faster |
+| Noisy sloped tile | **Simplify** + **Tolerance** + straight edges | 128 -> 27 | 0.18 s -> 0.06 s |
 
-`TerrainInstance.bake` returns both shown and baked triangle counts (2 for a flat slab), and status reports show the savings when optimizations reduce triangles (for example `Rebaked 6 tiles (768 to 12 triangles).`). Use **Rebake all** in `Settings > Baking` to apply changed options to already-baked tiles in one undo step.
+Status messages report savings whenever optimizations reduce triangles. Use **Rebake all** in **Settings > Baking** to apply updated options to existing baked tiles in one undo step.
 
-## Smoothing angle
+## Smoothing and triggers
 
-`Settings.smoothingAngle` defaults to `45` degrees (range `0` to `180`, step `5`; `0` gives flat shading). Submitting a new value calls `Bake.applySmoothing` (`src/Actions/Bake.luau`), which updates `SmoothingAngle` on every baked `UnionOperation` in the place in one undo step without re-running CSG.
-
-## When baking runs
-
-- **Auto-bake (`Settings.autoBake`, on by default)**:
-  - `Create` and single-step `Shape` / `Edges` / `Mesh` actions bake inside their own undo recording (`Recording.autoBake` in `src/Actions/Recording.luau`).
-  - Interactive viewport tools (`BrushTool`, `MaterialTool`, `MeshTool`, `StitchTool`) keep edited tiles as wedges while active (`Session.markDirty`) and call `Bake.bakeEdited()` as a separate undo step when the last editing tool stops.
-- **Manual baking**:
-  - Select tiles and click `Bake` or `Unbake` on the `Tiles` page (`Bake.bakeSelected`, `Bake.unbakeSelected`).
-  - Click `Bake all` on the `Overview` page (`Bake.bakeAll`), or `Rebake all` in `Settings > Baking` (`Bake.rebakeAll`).
-- **Progress and re-entrancy**: multi-tile bakes post `Baking i of N...` to the status bar, and starting a second bake while one is running is refused.
+- **Smoothing angle**: defaults to `45` deg (`0` to `180`, step `5`; `0` = flat shaded). Changing it calls `Bake.applySmoothing`, updating `SmoothingAngle` on every baked union in one undo step without re-running CSG (plain `Part` surfaces are skipped).
+- **Auto-bake** (**Settings > Baking > Bake automatically**, on by default): **Create** and single-step actions bake inside their own recording. Interactive viewport tools mark tiles dirty and call `Bake.bakeEdited()` when the last editing tool stops.
+- **Manual baking**: use **Bake** / **Unbake** on the Tiles page, **Bake all** on the Overview page, or **Rebake all** in **Settings > Baking**.
+- **Progress and cancel**: multi-tile bakes display `Baking i of N...` with a cancel button in the status bar (cancelling keeps tiles already finished) and block concurrent bakes.

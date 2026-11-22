@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Updates the base appearance of existing tiles: material, color, and material variant (custom
 	materials from Material Manager). Each tile holds one base material, since Roblox parts cannot

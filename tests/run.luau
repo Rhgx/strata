@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Runs every spec under Tests with Jest. Prints Jest's report and returns the counts of passed
 	and failed tests; raises when any test failed or the run itself broke. Load the built test

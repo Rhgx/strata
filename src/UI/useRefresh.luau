@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	React hook that triggers a re-render whenever the Studio selection changes, a status message
 	is posted (including operation completions), or undo/redo runs, keeping derived selection and

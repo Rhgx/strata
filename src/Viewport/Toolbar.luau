@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Manages Strata's Plugins ribbon buttons and Studio PluginActions: always creates the Strata
 	panel toggle button, registers bindable PluginActions for all 8 tools and Edit points (File >

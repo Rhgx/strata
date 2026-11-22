@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Resolves the displacement surface and exact shown triangle under a viewport ray for triangle
 	and vertex tools (Material, Mesh). Uses a live physics raycast to locate the tile, then tests

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Converts between Roblox studs and Hammer units where Hammer algorithms depend on absolute
 	scale (sewing tolerance, start corner rule, and noise lattice).

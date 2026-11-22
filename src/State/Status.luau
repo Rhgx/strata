@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Latest operation status shown in the panel's status bar. Success and warning messages expire
 	after a few seconds, errors persist until replaced, and progress messages (such as a long

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Snaps displacement edges onto the edges of standard parts (roads, floors, walls, wedge ramps,
 	and wedge-based triangle terrain) so terrain meets architecture cleanly without gaps or steps.

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Pick faces viewport tool: click part faces in 3D to collect them, then Create converts all
 	picked faces in one undo step and bake (like Hammer's Face Edit selection). Clicking a picked

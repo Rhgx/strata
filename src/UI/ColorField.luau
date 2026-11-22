@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Compact color input row for narrow panels: a color swatch, a hex text box, and an optional
 	pipette button on a single line, with an expandable ColorPicker (styled like Studio's with

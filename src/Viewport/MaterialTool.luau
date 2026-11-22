@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Viewport Material tool: paints a look (material, color, and material variant) onto tile
 	triangles (for example, roads through grass or rock patches). Each stroke is one undo step;

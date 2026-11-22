@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Builds throwaway tiles and parts for specs. Everything goes into an arena Folder that is never
 	parented to workspace, so specs cannot touch real terrain in the open place (Session scans

@@ -1,85 +1,118 @@
-# Hammer Mapping and Deviations
+# Hammer mapping
 
-Strata's terrain model and core algorithms follow Valve Hammer's displacement system, adapted for Roblox Studio's coordinate system, part types, and interactive sculpting workflow.
+How Strata maps Valve Hammer's displacement system onto Roblox Studio, what it adds, and where it deliberately deviates.
 
-## Units and coordinate mapping
+## Contents
 
-Defined in `src/Core/Units.luau`:
+[Units and axes](#units-and-axes) | [Concept mapping](#concept-mapping) | [Strata additions](#strata-additions) | [Deliberate deviations](#deliberate-deviations)
 
-- **Scale**: `HAMMER_UNITS_PER_STUD = 16`. A 72-unit Source player maps to 4.5 studs, close to a Roblox character. Every absolute constant taken from Hammer (sewing tolerance, subdivide merge tolerances, start-corner search, noise lattice spacing) derives from this single scale.
-- **Axes**: Hammer is Z-up and Roblox is Y-up. Both are right-handed, so a Roblox world point `(x, y, z)` converts to Hammer `(x * 16, -z * 16, y * 16)`.
+## Units and axes
+
+Source: `src/Core/Units.luau`
+
+- **Scale**: `HAMMER_UNITS_PER_STUD = 16`. A 72-unit Source player maps to 4.5 studs, matching a Roblox character. Every Hammer tolerance derives from this scale.
+- **Axes**: Hammer is Z-up and Roblox is Y-up (both right-handed), so Roblox `(x, y, z)` maps to Hammer `(x * 16, -z * 16, y * 16)`.
 
 ## Concept mapping
 
 | Valve Hammer | Strata | Module |
 | --- | --- | --- |
-| Brush quad faces | Block `Part` (6 faces) and wedges (3 faces: `Bottom`, `Back`, `Slope`; triangular sides skipped) | `src/Core/PartFaces.luau` |
-| Power (`2`, `3`, `4`) | `Detail`: `Low (5x5)`, `Medium (9x9)`, `High (17x17)` | `src/Core/Displacement.luau` |
-| VMF fields (`normals`, `distances`, `offsets`, `offset_normals`, `alphas`, `subdiv`, `elevation`) | Same fields and `GenerateDispSurf` formula (`flat + normal * distance + offset + faceNormal * elevation`) | `src/Core/Displacement.luau` |
-| Start corner (`GenerateSurfPointStartIndex`) | `Displacement.startCorner` evaluated in Hammer axes | `src/Core/Displacement.luau` |
-| Checkerboard triangulation (`BuildTriBLtoTR` / `BuildTriTLtoBR`) | `Displacement.gridTriangle` (even quads `00-11`, odd quads `01-10`) | `src/Core/Displacement.luau` |
-| Paint Geometry (`Raise/Lower`, `Raise To`, `Smooth`) | `Raise`, `Lower`, `Smooth`, `Raise To` brushes with six axes: `Face normal`, `Up (Y)` (Hammer's Z-up default), `X`, `Z`, `Picked` (`Alt + Right Click`), and `Curved (Round)` (`offsetNormals`) | `src/Core/Paint.luau`, `src/Viewport/BrushTool.luau` |
-| Subdivide | `Round`: 4-pass Catmull-Clark style smoothing on selected flat base quads; shared edges smooth while outer outlines stay sharp, and sculpted displacement rides on top | `src/Core/Subdivide.luau` |
-| Sew | `Sew tiles` and `Auto-sew after edits`: corners (up to 16 faces), 2:1 T-junctions (up to 8 faces), and full/half edges (up to 3 faces) matched within 1 Hammer unit per axis | `src/Core/Sew.luau` |
-| Noise | `Noise`: deterministic 3-octave value noise (persistence 1, 1 Hammer unit lattice, C-style 32-bit integer hash and truncation toward zero) applied along each vertex's field vector (or `offsetNormal` when untouched) | `src/Core/Noise.luau` |
-| Paint Alpha | Per-triangle painted looks via the `Material` tool: Roblox parts cannot blend textures by vertex alpha, so each look bakes into its own union. `Alphas` is still preserved in `DispData`, resampling, and `Sew` for parity. | `src/Viewport/MaterialTool.luau`, `src/Core/Displacement.luau` |
+| Brush quad faces | Block `Part` (6 faces) and wedges (3 quad faces) | `Core/PartFaces` |
+| Power (`2`, `3`, `4`) | **Detail**: Low (5x5), Medium (9x9), High (17x17) | `Core/Displacement` |
+| VMF displacement fields | Same fields and `GenerateDispSurf` formula | `Core/Displacement` |
+| `GenerateSurfPointStartIndex` | `Displacement.startCorner` in Hammer axes | `Core/Displacement` |
+| Checkerboard diagonals | `Displacement.gridTriangle` (`00-11` / `01-10`) | `Core/Displacement` |
+| Paint Geometry | **Raise**, **Lower**, **Smooth**, **Raise To** with 6 axes | `Core/Paint` |
+| Subdivide | **Round folds** (4-pass Catmull-Clark on flat quads) | `Core/Subdivide` |
+| Sew | **Sew tiles** and **Auto-sew after edits** | `Core/Sew` |
+| Noise | **Noise** (3-octave deterministic world-space noise) | `Core/Noise` |
+| Paint Alpha | Per-triangle **Material** looks (one union per look) | `Viewport/MaterialTool` |
+
+`Alphas` is still preserved in `DispData`, resampling, and `Sew` for VMF parity even though Roblox parts cannot blend textures by vertex alpha.
 
 ## Strata additions
 
-Features beyond Valve Hammer's displacement toolset:
+Features beyond Hammer's displacement toolset:
 
-- **Stitching (`Core/Stitch`, `Viewport/StitchTool`, `Actions/Edges`)**: snaps tile edges onto nearby block and wedge parts (roads, walls, ramps, wedge floors) within a configurable `Reach` and optionally pins stitched edges across edits (`Keep edges stitched`).
-- **Mesh density and holes (`Core/Mesh`, `Core/Simplify`, `Viewport/MeshTool`, `Actions/Mesh`)**: removes individual vertices to coarsen flat areas via a Delaunay triangulation (manually or with `Auto-simplify`) and cuts holes by deleting triangles, all losslessly. See [Data format](data-format.md).
-- **Edit points (`Viewport/PointEditor`, `Actions/Edges`)**: places a handle on each point of the selected tiles so single points can be moved with Studio's own Select, Move, Rotate, and Scale tools, keeping seams closed. Hammer edits single vertices only through its paint tools. See [Architecture](architecture.md#edit-points).
-- **Split 2x2 (`Displacement.split`, `Actions/Shape`)**: losslessly splits a `Medium` (power 3) or `High` (power 4) tile into four tiles one power lower, since each quarter of a `2^p + 1` grid is an exact `2^(p-1) + 1` grid with matching checkerboard parity.
-- **CSG baking (`Core/TerrainInstance`)**: merges wedges into `UnionOperation` parts (one per look) for continuous texture projection. See [Baking](baking.md).
+- **Stitching** (`Core/Stitch`, `Viewport/StitchTool`): snaps tile edges onto nearby block and wedge parts within **Reach** and optionally pins them across edits (**Keep edges stitched**).
+- **Mesh simplification and holes** (`Core/Mesh`, `Core/Simplify`, `Viewport/MeshTool`): losslessly removes vertices via Delaunay triangulation and cuts holes. See [Data format](data-format.md#mesh-simplification).
+- **Edit points** (`Viewport/PointEditor`): moves or deletes individual vertices using Studio's own Select, Move, Rotate, and Scale tools. See [Architecture: Edit points](architecture.md#edit-points).
+- **Split 2x2** (`Displacement.split`, `Actions/Shape`): losslessly quarters a Medium or High tile into four tiles one power lower with matching checkerboard parity.
+- **CSG baking** (`Core/TerrainInstance`): merges wedges into continuous unions. See [Baking](baking.md).
 
-## Deliberate deviations from Hammer
+## Deliberate deviations
 
-Each deviation below is also documented in its source module header.
+### 1. Start corner search bound
 
-### 1. Start corner search bound (`src/Core/Displacement.luau`)
+Source: `src/Core/Displacement.luau`
 
-Hammer initializes its minimum-corner search at `99999` (about 6,250 studs in Roblox). Strata initializes from `math.huge`, matching Hammer inside its range while continuing to work at larger world coordinates.
+- **Hammer**: initializes its minimum-corner search at `99999` (~6,250 studs).
+- **Strata**: initializes from `math.huge`.
+- **Why**: matches Hammer inside its range while working at arbitrary Roblox world coordinates.
 
-### 2. Power downsampling precision (`src/Core/Displacement.luau`)
+### 2. Power downsampling precision
 
-Strata mirrors Hammer's power transitions (stepping one power at a time, averaging each field independently without renormalizing normals, anti-diagonal averaging on upsample, and 3x3 mean filtering on downsample), but keeps downsampled `distances` as floats instead of accumulating through an integer, avoiding unnecessary truncation loss.
+Source: `src/Core/Displacement.luau`
 
-### 3. Brush timing, falloff, centering, and point preview (`src/Core/Paint.luau`, `src/Viewport/BrushTool.luau`)
+- **Hammer**: accumulates downsampled distances through an integer.
+- **Strata**: follows Hammer's one-step power transitions and 3x3 mean filter, but keeps `distances` as floats.
+- **Why**: avoids unnecessary integer truncation loss.
 
-- **Frame-rate independent strokes**: `Raise` and `Lower` apply `strength` studs per second integrated over `dt` along the cursor path (plus a `0.08` s tap dab on mouse down) instead of adding a fixed distance per mouse event.
-- **Soft falloff**: Strata uses `(1 - d^2/R^2)^1.5` instead of Hammer's `1 - d^2/R^2`. Hammer's quadratic curve meets the rim at a non-zero slope and leaves a crease; Strata's curve flattens at the rim (half strength at `0.61 * R`).
-- **Surface-centered cursor**: the brush centers on the exact raycast surface hit on snapshotted triangles (`src/Core/SurfaceRay.luau`) rather than snapping to the nearest vertex.
-- **Exact ring, point preview, and axial weighting**: the brush ring is always the real radius, and only kept points inside it move at any brush size. `Paint.preview` returns the kept points inside the ring with their falloff weights (up to 64; larger brushes hide dots), or, when the ring holds no point, up to 4 nearest kept points within `1.35` cell radii so an empty ring dims and shows where to aim. Squared distance along each tile's face normal is discounted by `AXIAL_SHARE = 0.75` so rising vertices stay inside a held brush. Strokes whose points are all pinned to parts (`Keep edges stitched`) leave no net change and are cancelled with a warning instead of recording an empty undo step.
-- **Soft `Raise To`**: `Hard` falloff matches Hammer's immediate absolute placement (clearing offset and elevation), while `Soft` falloff eases exponentially toward the target height feathered at the rim.
-- **`Raise To` from `World`**: `From: World` (`Settings.raiseToWorld`) measures `Height` along the active axis from the world origin instead of each tile's flat base, so one height aligns across tiles at different elevations (such as a road over stepped ground). `Ctrl + Click` samples the world height of any visible part under the cursor, and switching to `World` changes a `Face normal` or `Curved (Round)` axis to `Up (Y)`. Each `From` mode keeps its own `Height` (`Settings.otherHeight` stores the inactive one).
+### 3. Brush timing, falloff, ring, and Raise To
 
-### 4. Smooth neighborhood (`src/Core/Paint.luau`)
+Source: `src/Core/Paint.luau`, `src/Viewport/BrushTool.luau`
 
-Hammer's smoothing neighborhood shrinks to zero at the brush rim and weights neighbors by `0.5 / Distance`, which leaves most of a Roblox-scale grid (2 to 8 studs between vertices) untouched. Strata keeps a neighborhood radius of at least `1.5` grid steps everywhere inside the brush (or `0.25 * radius` for large brushes), weights neighbors by `(1 - u^2)^2`, and eases toward the neighbor average exponentially (capped at `MAX_STEP = 0.5` per tick to prevent overshoot).
+- **Frame-rate independent strokes**: **Raise** and **Lower** integrate `strength` studs/second over `dt` along the cursor path (plus a `0.08` s tap dab) instead of adding a fixed step per mouse event.
+- **Soft falloff**: uses `(1 - d^2/R^2)^1.5` instead of Hammer's `1 - d^2/R^2`, flattening the slope at the rim so strokes do not leave a crease.
+- **Surface-centered cursor**: aims at the exact raycast hit on snapshotted triangles (`Core/SurfaceRay`) rather than snapping to the nearest vertex.
+- **Exact ring**: the ring is always the real radius and only kept vertices inside it move.
+- **Point preview**: `Paint.preview` returns kept vertices inside the ring with falloff weights (up to 64), or up to 4 nearest points within `1.35` cell radii when the ring is empty.
+- **Axial weighting**: squared distance along `faceNormal` is discounted by `AXIAL_SHARE = 0.75` so rising points stay inside a held brush.
+- **Pinned strokes**: a stroke whose moved points are all pinned to parts is cancelled with a warning instead of recording an empty undo step.
+- **Soft Raise To**: **Hard** falloff snaps immediately like Hammer (clearing offset and elevation); **Soft** falloff eases exponentially toward **Height**.
+- **Raise To from World**: **From: World** measures **Height** from the world origin so one height aligns across stepped tiles. <kbd>Ctrl</kbd> + Click samples any visible part, and switching to World swaps per-tile axes to **Up (Y)**. Each **From** mode stores its own **Height**.
 
-### 5. Sewing fixes (`src/Core/Sew.luau`)
+### 4. Smooth neighborhood
 
-- **Direction-aware pairing**: Hammer pairs vertices of two full edges assuming they always run in opposite directions, which twists seams when edges run the same way. Strata compares endpoints and pairs vertices by actual direction.
-- **No "allowed vertex" pass**: Hammer projects unmatched vertices onto coarse neighbor triangles to handle vertices dropped during Source map compilation. Strata keeps every vertex, so this pass is unnecessary.
-- **2:1 T-edge half isolation**: when a long edge is denser than an adjacent half edge, Hammer re-interpolates the entire long edge, reopening seams on the other half. Strata interpolates only the half being sewn.
-- **3-face edge guard**: a 3-face edge group whose second entry is not a full edge match is skipped instead of taking Hammer's undefined branch.
+Source: `src/Core/Paint.luau`
 
-### 6. Stitching instead of exact brush-face sewing (`src/Core/Stitch.luau`)
+- **Hammer**: shrinks smoothing radius toward zero at the rim and weights by `0.5 / Distance`.
+- **Strata**: keeps a radius of at least `1.5` grid steps (or `0.25 * radius`), weights by `(1 - u^2)^2`, and eases exponentially (capped at `MAX_STEP = 0.5` per tick).
+- **Why**: Roblox-scale grids (2 to 8 studs between vertices) were barely touched by Hammer's shrinking neighborhood.
 
-Hammer only flattens displacement edges that already lie directly on a brush face. Because Roblox parts rarely align that closely, Strata matches block and wedge edges within a configurable `Reach` (default `2` studs):
+### 5. Sewing fixes
 
-- **Shared interior edges dropped**: the stretches of edges shared by adjacent parts are excluded, so a floor made of wedges ("triangle terrain") matches as one outer outline. Only the shared stretch goes: a wall butting into the middle of a longer wall leaves the rest of the longer wall's edge matchable.
-- **Orientation filtering**: a part edge qualifies when its side face points back toward the tile edge within about 75 degrees (`OUTWARD_DOT = 0.25`) and does not stand nearly vertical out of the tile plane (`MIN_IN_PLANE = 0.25`).
-- **Bends and ramps**: where two candidate edges meet at a bend, vertices past one edge's end snap to the shared corner, avoiding V-shaped gaps. With `extend` enabled, matched edges follow ramps and walls sideways at any height once a vertex is within reach.
-- **Inside corners**: a tile corner whose two edges match two different, non-parallel part edges (two walls meeting, an L-shaped floor) moves to where those edges cross, so it touches both instead of stopping short of one. Where the edges pass at different heights, the corner takes the height that still sits against both parts' side faces. Coincident corners of neighboring tiles make the same choice.
-- **Propagation**: snapped positions propagate to coincident neighbor edges rather than averaging via `Sew`, so the part edge always wins at shared corners.
+Source: `src/Core/Sew.luau`
 
-### 7. Subdivide winding and centroid timing (`src/Core/Subdivide.luau`)
+- **Direction-aware pairing**: compares endpoints instead of assuming full edges always run in opposite directions (which twists seams).
+- **No allowed-vertex pass**: Strata retains all vertices, so Hammer's compile-time projection pass is unnecessary.
+- **2:1 T-edge isolation**: interpolates only the half edge being sewn so the other half does not reopen.
+- **3-face edge guard**: skips malformed 3-face groups instead of taking Hammer's undefined branch.
 
-Vertex normals use the opposite cross-product order to Hammer because Strata's corner winding is mirrored (`Displacement.faceNormal`). When splitting a quad, the face point uses the quad's centroid at split time (after that pass moves vertices).
+### 6. Reach-based stitching
 
-### 8. Noise precision and default range (`src/Core/Noise.luau`, `src/State/Settings.luau`)
+Source: `src/Core/Stitch.luau`
 
-Noise evaluates in Luau double-precision floats rather than 32-bit floats (values can differ in the lowest bits, while 32-bit unsigned integer wraparound in the lattice hash is reproduced with 16-bit split multiplication). Default noise bounds in `State/Settings` are `-1` to `1` studs rather than Hammer's `0` to `0`.
+Hammer only flattens edges already lying directly on a brush face. Strata matches nearby block and wedge edges within **Reach** (default `2` studs):
+
+- **Shared interior edges dropped**: removes only the shared stretch between adjacent parts, so multi-wedge floors match as one outline and T-junction walls keep their uncovered stretches.
+- **Orientation filtering**: requires the part's side face to point toward the tile edge within ~75 degrees (`OUTWARD_DOT = 0.25`) and skips near-vertical edges (`MIN_IN_PLANE = 0.25`).
+- **Bends and ramps**: vertices past a joined corner snap to that corner, and `extend` follows ramps and walls vertically once any vertex is in reach.
+- **Inside corners**: a corner matched to two non-parallel part edges moves to their crossing at the height sitting against both side faces. Coincident neighbor corners join the same decision.
+- **Propagation**: snapped vertices propagate directly to neighbor seams so parts always win over sew averaging.
+
+### 7. Subdivide winding and centroid timing
+
+Source: `src/Core/Subdivide.luau`
+
+- **Hammer**: computes vertex normals with its native winding and quad centroids from pre-pass positions.
+- **Strata**: reverses cross-product order for its mirrored winding and evaluates quad centroids at split time.
+- **Why**: matches Strata's corner winding (`Displacement.faceNormal`) and produces smooth post-pass face centers.
+
+### 8. Noise precision and default range
+
+Source: `src/Core/Noise.luau`, `src/State/Settings.luau`
+
+- **Hammer**: 32-bit floats with default range `0` to `0`.
+- **Strata**: Luau double-precision floats (reproducing 32-bit integer lattice hash wraparound via 16-bit split multiplication) with default range `-1` to `1` studs.
+- **Why**: Luau has no float32 type, and `-1` to `1` makes **Apply noise** immediately usable.

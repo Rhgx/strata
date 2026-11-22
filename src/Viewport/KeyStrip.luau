@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Click-through single-line shortcut bar pinned near the bottom of the 3D viewport, styled with
 	Studio's active theme. Shared across viewport tools.

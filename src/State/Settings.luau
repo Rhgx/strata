@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shared tool settings. The UI, ribbon buttons, keyboard shortcuts, and plugin actions write
 	to this store while viewport tools read it every frame. Kept outside React so painting never

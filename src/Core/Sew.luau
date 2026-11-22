@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Welds shared edges and corners of neighboring displacements, following Hammer's Sew. Like
 	Hammer, sewing operates in displacement space: it modifies stored fields (field vector,

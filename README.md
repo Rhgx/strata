@@ -1,54 +1,77 @@
 <h1><picture><source media="(prefers-color-scheme: dark)" srcset="assets/logo/strata-dark.svg"><source media="(prefers-color-scheme: light)" srcset="assets/logo/strata-light.svg"><img src="assets/logo/strata-light.svg" alt="" width="32" height="32" align="absmiddle"></picture> Strata</h1>
 
-Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement terrain built from `WedgePart` geometry. Each tile stores its editable data in a `DispData` `Configuration` and bakes into `UnionOperation` parts (one per look) for seamless material projection, so terrain models publish and reopen like normal Roblox models. This repository is private.
+Hammer-style displacement terrain for Roblox Studio.
+
+![Version](https://img.shields.io/badge/version-1.0.0--beta.1-informational)
+![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+![Roblox Studio](https://img.shields.io/badge/Roblox%20Studio-plugin-lightgrey)
+
+Turn block and wedge parts into editable displacement tiles, sculpt and paint them, then bake each tile into unions that publish and reopen like any Roblox model.
 
 ## Features
 
-- **Create terrain**: convert selected block and wedge parts into tiled displacements, or pick individual faces in 3D with `Pick faces`.
-- **Sculpt**: shape terrain across tile seams with `Raise`, `Lower`, `Smooth`, and `Raise To` brushes, configurable falloff, and multiple movement axes ([Hammer mapping](docs/hammer.md), [Panel UI](docs/ui.md)).
-- **Paint materials**: paint roads, paths, and surface patches onto tiles by grid cell or single triangle; each look bakes into its own union ([Data format](docs/data-format.md)).
-- **Stitch and sew**: snap tile edges onto nearby block or wedge parts (including wedge floors) and keep them pinned across edits, or weld seams between neighboring tiles automatically or on demand ([Hammer mapping](docs/hammer.md)).
-- **Shape tiles**: change tile detail (`Low 5x5`, `Medium 9x9`, `High 17x17`), smooth folded seams with `Round`, apply deterministic `Noise`, or `Split 2x2` losslessly into smaller tiles.
-- **Mesh density and holes**: simplify flat areas into fewer, larger triangles (manually or with `Auto-simplify`) and cut holes for paths or openings, with lossless restore ([Data format](docs/data-format.md)).
-- **Edit points**: put a handle on every point of the selected tiles and move single points with Studio's own Move, Rotate, and Scale tools (or delete them), with seams kept closed ([Architecture](docs/architecture.md#edit-points)).
-- **Appearance**: change a tile's base `Material`, `Color`, or `MaterialVariant` without unbaking, or copy a look from any part or tile with the pipette ([Panel UI](docs/ui.md)).
-- **Bake and reopen**: merge wedges into unions automatically or on demand with configurable smoothing and bake optimizations, and restore wedges automatically on the next edit ([Baking](docs/baking.md)).
+- **Create**: convert selected parts into tiled terrain, or pick single faces in 3D.
+- **Sculpt**: Raise, Lower, Smooth, and Raise To brushes that work smoothly across seams.
+- **Paint**: per-cell or per-triangle materials; each look bakes into its own union.
+- **Stitch and sew**: snap tile edges onto roads, floors, and walls, and weld neighboring seams.
+- **Shape**: change grid detail (`5x5`, `9x9`, `17x17`), **Round folds**, add **Noise**, or **Split 2x2**.
+- **Mesh**: simplify flat ground and cut holes, both fully reversible.
+- **Edit points**: move or delete individual vertices using Studio's Move, Rotate, and Scale tools ([Using Strata](docs/usage.md#edit-points)).
+- **Appearance**: change material, color, or variant without unbaking, or sample from any part with the pipette.
+- **Bake**: automatic or manual union baking with optional triangle optimization.
 
-## Quick start
+## Install
 
-### Install
+1. Get `Strata.rbxm` from a release, or [build it from source](#build-from-source).
+2. Copy it into Studio's plugins folder (**Plugins > Plugins Folder**).
+3. Restart Studio and open **Strata** from the **Plugins** tab.
 
-1. Build `Strata.rbxm` (see below) or copy a built `Strata.rbxm` into your local Roblox Studio Plugins folder.
-2. Restart Roblox Studio.
-3. Open **Strata** from the **Plugins** ribbon tab. The panel's tool strip holds all eight viewport tools. Enable **Settings > Interface > Tools on Plugins ribbon** to mirror them on the ribbon (all eight also register actions under `File > Advanced > Customize Shortcuts`).
+> [!NOTE]
+> Keep the filename `Strata.rbxm` when updating. Studio loads every `.rbxm` in the plugins folder, so a renamed file will run alongside the old copy.
 
-### Build from source
+## Quick workflow
 
-Strata uses [Aftman](https://github.com/LPGhatguy/aftman) for toolchain versions (`aftman.toml`: Rojo 7.7.1, Wally 0.3.2) and [Wally](https://wally.run) for Luau packages (`wally.toml`: React, ReactRoblox, StudioComponents, Lucide).
+1. Select block or wedge parts and click **Create**, or use **Pick faces** in the tool strip.
+2. Sculpt with the brush tools. Hold <kbd>Ctrl</kbd> to invert and <kbd>Shift</kbd> to smooth.
+3. Paint surfaces with **Material**; simplify flat areas or cut holes with **Mesh**.
+4. Use **Stitch** to snap edges onto nearby parts and **Sew tiles** to close tile seams.
+5. Stop the tool (<kbd>Esc</kbd>). Edited tiles bake automatically and unbake on the next edit.
+
+> [!TIP]
+> All eight tools and **Edit points** register bindable actions under **File > Advanced > Customize Shortcuts** (search for `Strata`).
+
+## Build from source
+
+Requires [Aftman](https://github.com/LPGhatguy/aftman) (`aftman.toml`: Rojo 7.7.1, Wally 0.3.2).
 
 ```powershell
 aftman install
 wally install
+rojo build --plugin Strata.rbxm   # builds straight into Studio's plugins folder
 ```
 
-Build straight into your local Studio Plugins folder (Studio loads new plugin files on restart):
+Build a release copy into `dist/Strata.rbxm` (verifies `src/Version.luau` and `wally.toml` match):
 
 ```powershell
-rojo build --plugin Strata.rbxm
+.\scripts\release.ps1
 ```
 
-To build and run the dev-only unit test suite in Studio, see [Testing](docs/testing.md).
+To run the dev-only Jest-Lua unit tests in Studio, see [Testing](docs/testing.md).
 
 ## Documentation
 
-Technical documentation lives in [`docs/`](docs/README.md):
+- [Using Strata](docs/usage.md): tools, shortcuts, sculpt axes, cursors, and settings
+- [Architecture](docs/architecture.md): layer order, module map, lifecycle, and Edit points internals
+- [Data format](docs/data-format.md): instance layout, `DispData` attributes, looks, holes, and simplification
+- [Baking](docs/baking.md): CSG pipeline, texture alignment, and bake optimizations
+- [Hammer mapping](docs/hammer.md): units, Valve Hammer equivalents, and deliberate deviations
+- [Panel UI](docs/ui.md): overlay shell, color system, shared row helpers, and custom controls
+- [Testing](docs/testing.md): running and writing Jest-Lua specs
 
-| Page | Covers |
-| --- | --- |
-| [Documentation index](docs/README.md) | Overview of pages and brand/icon assets |
-| [Architecture](docs/architecture.md) | Six-layer structure (`Core -> State -> Scene -> Actions -> Viewport -> UI`), module map, and plugin lifecycle |
-| [Data format](docs/data-format.md) | `DispData` attributes, vertex math, model layout, painted looks, holes, and mesh simplification |
-| [Baking](docs/baking.md) | Texture projection, flat slab fast path, anchor cube alignment, two-step CSG, and bake optimizations |
-| [Hammer mapping](docs/hammer.md) | Unit scale, Valve Hammer equivalents, Strata additions, and intentional deviations |
-| [Panel UI](docs/ui.md) | Panel layout, viewport shortcuts, color system, `Rows` helpers, `Dropdown`, and `ColorPicker` |
-| [Testing](docs/testing.md) | Jest-Lua unit test suite, running `tests.rbxm` in Studio, and adding specs |
+## License
+
+Copyright (C) 2026 Rocks. Licensed under the GNU General Public License v3.0 or later; see [LICENSE](LICENSE).
+
+Terrain, models, and places you create with Strata are yours, under any license you choose. The GPL covers only Strata's own code.
+
+Bundled packages keep their own licenses: React-Lua, StudioComponents, and `lucide-icons` (MIT), and Lucide icon art (ISC). `src/UI/Dropdown.luau` is adapted from StudioComponents (MIT); its notice is preserved in that file.

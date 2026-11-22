@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Cursor hint channel shared between viewport tools and Viewport/Activation. Tools report their
 	per-frame state here; Activation owns mouse.Icon and combines the hint, active tool, and

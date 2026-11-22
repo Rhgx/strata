@@ -1,4 +1,7 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- Copyright (c) 2025 sircfenner (portions from StudioComponents)
+-- SPDX-License-Identifier: GPL-3.0-or-later AND MIT
 --[[
 	Studio-style dropdown modeled on Qt combo boxes. Built on StudioComponents' Dropdown (MIT
 	license below) with added keyboard navigation:

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Studio-style color picker supporting RGB, HSV, Hex, and Brick modes. RGB/HSV/Hex modes show
 	matching numeric or hex inputs with a saturation-value square and hue slider; Brick mode shows

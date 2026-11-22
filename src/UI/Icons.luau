@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Lucide icons (https://lucide.dev) sourced from the latte-soft/lucide-icons sprite sheets.
 	Uses 16 px icons for the tool strip and status bar, and 14 px icons for in-page buttons and
@@ -58,6 +60,7 @@ return table.freeze({
 	CopyAppearance = item("pipette"),
 	Back = item("arrow-left"),
 	Select = item("box-select"),
+	EditTiles = item("sliders-horizontal"),
 	EditPoints = item("pen-tool"),
 	RoundFolds = item("spline"),
 	SplitTiles = item("grid-2x2"),

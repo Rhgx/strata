@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Baking actions: merges displacement wedges into unions for smooth textures and reduced part
 	counts, and unbakes tiles back to wedges for editing. See Core/TerrainInstance.bake.

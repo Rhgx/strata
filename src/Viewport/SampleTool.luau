@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Copy appearance viewport mode (pipette on the Tiles page Color row): hover any visible part
 	or terrain tile and click to copy its material, color, and material variant onto the selected

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Selected tiles inspector and action page: detail level, base appearance, actions, noise,
 	resets, and baking.

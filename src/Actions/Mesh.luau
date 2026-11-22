@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Mesh simplification actions. Simplify operates in two phases (see Scene/MeshStage): points
 	are staged first with a live preview, and `applyMarks` commits all changes in one undo step.

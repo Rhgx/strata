@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Wraps every plugin action in a single ChangeHistoryService recording so Ctrl+Z undoes the
 	action, its sewing, and its baking together. Failed actions cancel the recording (restoring

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Hammer-compatible Subdivide: Catmull-Clark style subdivision of selected displacements' flat
 	base quads, written into per-vertex offsets and offset normals while preserving sculpted

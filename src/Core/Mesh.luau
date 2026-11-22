@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Delaunay triangulation of kept displacement vertices when grid points are removed (Simplify
 	mode), computed in the flat 2D grid plane.

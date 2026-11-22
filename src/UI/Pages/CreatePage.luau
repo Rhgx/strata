@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Terrain creation page for converting parts into displacements, supporting both selected
 	block/wedge parts (with a Faces dropdown) and faces collected interactively via Pick faces.

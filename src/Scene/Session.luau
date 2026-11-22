@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shared cache of opened displacements used by brushes and edit actions so all tools operate on
 	the same in-memory data. Also tracks displacements modified since their last bake. Because

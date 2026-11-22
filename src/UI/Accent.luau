@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Accent colors layered onto Studio's theme. Each brush tool uses a single hue shared with its
 	3D viewport cursor so the tool strip, tool page, and viewport read cohesively. Success status

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Persistent preferences overlay opened from the status bar gear icon, organized into Edges,
 	Baking, and Interface tabs.
@@ -38,15 +40,12 @@ type ToggleKey =
 
 type Tab = "edges" | "baking" | "interface"
 
-local TABS: { { id: Tab, label: string, tip: string } } = {
+local TABS: { Rows.Tab<Tab> } = {
 	{ id = "edges", label = "Edges", tip = "**Edges and stitching**: sewing tile seams and snapping edges onto parts." },
 	{ id = "baking", label = "Baking", tip = "**Baking**: merging tiles into unions, shading and bake optimizations." },
 	{ id = "interface", label = "Interface", tip = "**Interface**: 3D view hints, brush dots and ribbon buttons." },
 }
 
--- Combined height of the fixed top area (top padding, header row, gap, tab strip, bottom gap).
-local TOP_HEIGHT = 6 + 22 + 4 + Rows.BUTTON_HEIGHT + 6
-local TAB_GAP = 4
 -- Require a second confirmation click for Rebake all above this tile count.
 local CONFIRM_ABOVE = 20
 local CONFIRM_SECONDS = 4
@@ -346,86 +345,15 @@ end
 
 local function SettingsPage(props: { settings: Settings.State })
 	local settings = props.settings
-	local theme = StudioComponents.useTheme()
 	local tab, setTab = React.useState(lastTab)
-
-	-- Positioned manually instead of Rows.grid because UIGridLayout can wrap the third cell
-	-- onto a second line when fractional widths round up.
-	local tabButtons: { [string]: unknown } = {}
-	local count = #TABS
-
-	for i, item in TABS do
-		tabButtons[item.id] = e("Frame", {
-			Position = UDim2.new((i - 1) / count, math.floor(TAB_GAP * (i - 1) / count), 0, 0),
-			Size = UDim2.new(1 / count, -math.ceil(TAB_GAP * (count - 1) / count), 1, 0),
-			BackgroundTransparency = 1,
-		}, {
-			Tip = Rows.withTooltip(
-				item.tip,
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = item.label,
-					Selected = tab == item.id,
-
-					OnActivated = function ()
-						lastTab = item.id
-						setTab(item.id)
-					end,
-				})
-			),
-		})
-	end
-
 	local content = if tab == "edges" then edgesTab(settings) elseif tab == "baking" then bakingTab(settings) else interfaceTab(settings)
 
-	return e("Frame", {
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-	}, {
-		-- Keep header and tab strip fixed while tab contents scroll underneath.
-		Top = e("Frame", {
-			Size = UDim2.new(1, 0, 0, TOP_HEIGHT),
-			BackgroundTransparency = 1,
-		}, {
-			Padding = e("UIPadding", {
-				PaddingLeft = UDim.new(0, 7),
-				PaddingRight = UDim.new(0, 7),
-				PaddingTop = UDim.new(0, 6),
-			}),
-
-			Layout = e("UIListLayout", {
-				SortOrder = Enum.SortOrder.LayoutOrder,
-				Padding = UDim.new(0, 4),
-			}),
-
-			Header = Rows.header(1, "Settings", function ()
-				Settings.setOverlay("none")
-			end, "**Close settings** (`Esc`)."),
-
-			Tabs = e("Frame", {
-				LayoutOrder = 2,
-				Size = UDim2.new(1, 0, 0, Rows.BUTTON_HEIGHT),
-				BackgroundTransparency = 1,
-			}, tabButtons),
-		}),
-
-		Divider = e("Frame", {
-			Position = UDim2.fromOffset(0, TOP_HEIGHT),
-			Size = UDim2.new(1, 0, 0, 1),
-			BorderSizePixel = 0,
-			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
-		}),
-
-		Body = e("Frame", {
-			Position = UDim2.fromOffset(0, TOP_HEIGHT + 1),
-			Size = UDim2.new(1, 0, 1, -(TOP_HEIGHT + 1)),
-			BackgroundTransparency = 1,
-			ClipsDescendants = true,
-		}, {
-			-- Key by tab name so switching tabs resets scroll position to the top.
-			[tab] = Rows.page(content),
-		}),
-	})
+	return Rows.overlay("Settings", function ()
+		Settings.setOverlay("none")
+	end, "**Close settings** (`Esc`).", TABS, tab, function (nextTab: Tab)
+		lastTab = nextTab
+		setTab(nextTab)
+	end, content)
 end
 
 return SettingsPage

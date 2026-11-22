@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Default overview page shown when no tool is running and no convertible parts or tiles are
 	selected: displays onboarding guidance when the place has no terrain, or tile counts and

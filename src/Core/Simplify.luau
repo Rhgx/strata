@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Identifies displacement vertices that can be removed without distorting the surface beyond a
 	configured tolerance. Used by both Auto-simplify (which stages vertices for user review) and

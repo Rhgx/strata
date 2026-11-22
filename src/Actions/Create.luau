@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Converts faces of block Parts and wedges into displacements, analogous to Hammer's brush-face
 	displacement creation (see Core/PartFaces). Accepts either selected parts with a face mode

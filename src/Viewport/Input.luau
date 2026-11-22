@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shared viewport input layer: tracks modifier keys across both the 3D viewport and the Strata
 	panel, dispatches unified keyboard shortcuts, and suppresses Studio camera zoom during

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Edge actions: sewing displacements to each other (Hammer's Sew), stitching tile edges onto
 	standard parts (Core/Stitch), maintaining part-edge pins for Keep edges stitched, and running

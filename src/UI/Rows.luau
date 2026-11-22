@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shared layout helpers modeled on Studio's Properties window and sized for a narrow dock
 	widget (~190 px usable width at minimum size): section headings, label/control rows with
@@ -27,11 +29,19 @@ local HEADING_TOP = 6
 -- Secondary text tone: dimmed for empty states, warning for actionable issues.
 export type Tone = "dimmed" | "warning"
 
+export type Tab<T> = {
+	id: T,
+	label: string,
+	tip: string,
+}
+
 type CollapsibleProps = {
 	LayoutOrder: number,
 	Id: string,
 	Title: string,
 	Tooltip: string,
+	Icon: Icons.Icon?,
+	IconColor: Color3?,
 	-- Expanded rows passed as a prop rather than children because they nest inside another table.
 	Content: { [string]: unknown },
 }
@@ -367,10 +377,23 @@ local function Collapsible(props: CollapsibleProps)
 					ImageColor3 = theme:GetColor(Enum.StudioStyleGuideColor.DimmedText),
 				}),
 
+				Badge = if props.Icon
+					then e("ImageLabel", {
+						AnchorPoint = Vector2.new(0, 1),
+						Position = UDim2.new(0, 16, 1, -1),
+						Size = UDim2.fromOffset(14, 14),
+						BackgroundTransparency = 1,
+						Image = props.Icon.Image,
+						ImageRectOffset = props.Icon.RectOffset,
+						ImageRectSize = props.Icon.RectSize,
+						ImageColor3 = props.IconColor or theme:GetColor(Enum.StudioStyleGuideColor.DimmedText),
+					})
+					else nil,
+
 				Title = e(StudioComponents.Label, {
 					AnchorPoint = Vector2.new(0, 1),
-					Position = UDim2.new(0, 16, 1, 0),
-					Size = UDim2.new(1, -16, 0, HEADING_HEIGHT),
+					Position = UDim2.new(0, if props.Icon then 34 else 16, 1, 0),
+					Size = UDim2.new(1, if props.Icon then -34 else -16, 0, HEADING_HEIGHT),
 					Text = `<b>{props.Title}</b>`,
 					RichText = true,
 					TextXAlignment = Enum.TextXAlignment.Left,
@@ -384,8 +407,110 @@ local function Collapsible(props: CollapsibleProps)
 end
 
 -- Collapsible section toggled by clicking its header (closed by default).
-function Rows.collapsible(layoutOrder: number, id: string, title: string, tooltip: string, content: { [string]: unknown })
-	return e(Collapsible, { LayoutOrder = layoutOrder, Id = id, Title = title, Tooltip = tooltip, Content = content })
+function Rows.collapsible(
+	layoutOrder: number,
+	id: string,
+	title: string,
+	tooltip: string,
+	content: { [string]: unknown },
+	icon: Icons.Icon?,
+	iconColor: Color3?
+)
+	return e(Collapsible, {
+		LayoutOrder = layoutOrder,
+		Id = id,
+		Title = title,
+		Tooltip = tooltip,
+		Icon = icon,
+		IconColor = iconColor,
+		Content = content,
+	})
+end
+
+-- Tabbed overlay shell (Settings, Help): pinned header, equal-width tab strip, 1 px divider,
+-- and a scrollable body keyed by active tab so switching tabs resets scroll to the top.
+function Rows.overlay<T>(
+	title: string,
+	onBack: () -> (),
+	closeTip: string,
+	tabs: { Tab<T> },
+	active: T,
+	onSelect: (T) -> (),
+	content: { [string]: unknown }
+)
+	-- Combined height of the fixed top area (top padding, header row, gap, tab strip, bottom gap).
+	local topHeight = 6 + ROW_HEIGHT + GAP + Rows.BUTTON_HEIGHT + 6
+	-- Positioned manually instead of Rows.grid because UIGridLayout can wrap the last cell onto
+	-- a second line when fractional widths round up.
+	local tabButtons: { [string]: unknown } = {}
+	local count = #tabs
+
+	for i, item in tabs do
+		tabButtons[tostring(item.id)] = e("Frame", {
+			Position = UDim2.new((i - 1) / count, math.floor(GAP * (i - 1) / count), 0, 0),
+			Size = UDim2.new(1 / count, -math.ceil(GAP * (count - 1) / count), 1, 0),
+			BackgroundTransparency = 1,
+		}, {
+			Tip = Rows.withTooltip(
+				item.tip,
+				e(StudioComponents.Button, {
+					Size = UDim2.fromScale(1, 1),
+					Text = item.label,
+					Selected = active == item.id,
+
+					OnActivated = function ()
+						onSelect(item.id)
+					end,
+				})
+			),
+		})
+	end
+
+	return e("Frame", {
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+	}, {
+		Layout = e("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+		}),
+
+		Top = e("Frame", {
+			LayoutOrder = 1,
+			Size = UDim2.new(1, 0, 0, topHeight),
+			BackgroundTransparency = 1,
+		}, {
+			Padding = e("UIPadding", {
+				PaddingLeft = UDim.new(0, 7),
+				PaddingRight = UDim.new(0, 7),
+				PaddingTop = UDim.new(0, 6),
+			}),
+
+			Layout = e("UIListLayout", {
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, GAP),
+			}),
+
+			Header = Rows.header(1, title, onBack, closeTip),
+
+			Tabs = e("Frame", {
+				LayoutOrder = 2,
+				Size = UDim2.new(1, 0, 0, Rows.BUTTON_HEIGHT),
+				BackgroundTransparency = 1,
+			}, tabButtons),
+		}),
+
+		Divider = Rows.divider(2),
+
+		Body = e("Frame", {
+			LayoutOrder = 3,
+			Size = UDim2.new(1, 0, 1, -(topHeight + 1)),
+			BackgroundTransparency = 1,
+			ClipsDescendants = true,
+		}, {
+			-- Key by tab name so switching tabs resets scroll position to the top.
+			[tostring(active)] = Rows.page(content),
+		}),
+	})
 end
 
 return Rows

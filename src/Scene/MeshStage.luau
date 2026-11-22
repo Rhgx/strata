@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Staged point marks for the Mesh tool's Simplify mode: points marked for removal (shown in
 	orange) or removed points marked for restoration (green). Marking does not modify tiles; the

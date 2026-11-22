@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Geometry sculpt brushes, modeled after Hammer's spatial Paint Geometry with frame-rate-independent
 	Studio timing. The brush acts as a world-space sphere affecting every vertex inside it across

@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Geometry actions on selected displacements: Detail (Hammer power resampling), Round (Hammer
 	Subdivide), Noise, and lossless Split 2x2.

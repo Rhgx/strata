@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Shared coverage and write logic for triangle-based brushes (Material tool and Mesh Cut holes).
 

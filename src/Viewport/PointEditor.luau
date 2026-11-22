@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Edit points: puts a small handle Part on every editable point of the chosen tiles, so points
 	can be picked and moved with Studio's own Select, Move, Rotate, and Scale tools (box select,

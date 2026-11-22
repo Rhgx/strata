@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Source-style displacement data model and surface math.
 
@@ -79,6 +81,7 @@ local LOOK_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
 local HOLE_DIGIT = "-"
 -- Increment when serialized DispData changes incompatibly (pre-release data is migrated manually).
 local FORMAT_VERSION = 1
+Displacement.FORMAT_VERSION = FORMAT_VERSION
 
 local function sizeForPower(power: number): number
 	return bit32.lshift(1, power) + 1

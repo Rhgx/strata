@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Options page for the active Mesh tool: Simplify mode (mark points, preview triangle count,
 	apply or clear) and Cut holes mode. The staged commit block appears only while points are

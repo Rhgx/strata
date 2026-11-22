@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Top tool button strip pinned to the panel. Mirrors the ribbon buttons (which live on the
 	Plugins tab where builders rarely stay) so every tool stays one click away. Renders icon-only

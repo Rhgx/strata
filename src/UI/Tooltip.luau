@@ -1,4 +1,6 @@
 --!strict
+-- Copyright (C) 2026 Rocks
+-- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Themed hover tooltip rendered through a portal into the ancestor PluginGui so scroll frames
 	and clipped containers never cut it off (matching StudioComponents dropdown portals). Sizes to
