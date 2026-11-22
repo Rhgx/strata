@@ -301,14 +301,25 @@ return function (plugin: Plugin): () -> ()
 
 		local edited = 0
 
-		for opened in touched do
-			TerrainInstance.save(opened)
-			edited += 1
-		end
+		-- A save that throws must still finish the recording, or Studio stays "busy recording"
+		-- and every later edit fails.
+		local saved, saveErr = pcall(function ()
+			for opened in touched do
+				TerrainInstance.save(opened)
+				edited += 1
+			end
+		end)
 
 		table.clear(touched)
 		table.clear(warned)
 		lastCenter = nil
+
+		if not saved then
+			ChangeHistoryService:FinishRecording(current, Enum.FinishRecordingOperation.Cancel)
+			Session.clear()
+			Status.post("error", `Could not save the stroke: {saveErr}`)
+			return
+		end
 
 		ChangeHistoryService:FinishRecording(
 			current,
