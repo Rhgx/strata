@@ -83,7 +83,7 @@ local function BrushPage(props: { settings: Settings.State })
 				RadiusPreview.pulse()
 			end),
 			"**Brush size** in studs.\n\n"
-				.. "The brush always reaches at least one grid step (set by `Detail`). Below that, a smaller radius pushes more gently.\n\n"
+				.. "Below a tile's grid size, moves the single nearest point (marked) at full strength. Use a finer grid (`Detail`, or `Split 2x2` then `Detail`) for smaller area brushes.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
 

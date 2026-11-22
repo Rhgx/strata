@@ -7,9 +7,10 @@
 	- Raise and Lower move vertices along the paint axis by `strength` studs/second at the center,
 	  weighted by falloff: Soft uses (1 - d^2/R^2)^1.5 and Hard uses 1. (Hammer applies its
 	  Distance once per mouse event with 1 - d^2/R^2, which leaves a visible crease at the rim.)
-	- Brushes smaller than the grid spacing expand to reach at least one grid step (see
-	  effectiveRadius) so they never sit dead between vertices. Distance down-weights offsets
-	  along the tile's normal so vertices rising under a held brush remain inside it.
+	- The brush is always the real radius. Below a tile's grid size (pointThreshold) a sphere could
+	  sit dead between points, so each path sample there acts on the single nearest point instead
+	  (point mode, see snapIn), at full strength. Distance down-weights offsets along the tile's
+	  normal so vertices rising under a held brush remain inside it.
 	- Raise To with Hard falloff snaps vertices to `height` studs along the axis from the flat
 	  base face, clearing offset and elevation (Hammer's absolute mode). Soft falloff eases
 	  toward that target with a feathered rim.
@@ -39,6 +40,12 @@ export type Falloff = "Soft" | "Hard"
 -- Face: tile base normal. Up: world +Y (Hammer's default Z-up). Picked: user-sampled world
 -- vector. Subdiv: per-vertex subdivision offset normal.
 export type Axis = "Face" | "Up" | "X" | "Z" | "Picked" | "Subdiv"
+
+-- A point-mode target: the nearest eligible point and its coincident seam twins, moved together.
+export type Snap = {
+	points: { { opened: Opened, index: number } },
+	position: Vector3,
+}
 
 export type Brush = {
 	effect: Effect,
@@ -70,11 +77,16 @@ local SMOOTH_RATE = 1.5
 local MAX_SMOOTH_RATE = 24
 local RAISE_TO_RATE = 2.5
 
--- Minimum effective reach in grid steps so small brushes never miss every vertex (0.75 for Hard
--- still isolates a single vertex under the cursor). Smaller user radii still scale gentleness
--- proportionally so radius 1 and radius 3 feel distinct.
-local MIN_SOFT_STEPS = 1
-local MIN_HARD_STEPS = 0.75
+-- Point mode starts below this share of a tile's RMS cell spacing (its cell size on a square
+-- grid). Right above it, a sample at a cell's center still gives each corner a usable Soft
+-- weight, so the switch to area mode never leaves a weak spot. One threshold for every effect
+-- and falloff, so holding Shift for Smooth or switching falloff never flips modes mid-stroke.
+local POINT_SHARE = 0.85
+-- Point mode snaps to points within this many cell radii (center to corner), so every spot on
+-- an unsimplified tile has a point while a simplified area never grabs a far-away corner.
+local SNAP_SHARE = 1.35
+-- Points of different tiles closer than this are the same point (matching Sew and Edges).
+local TWIN_DISTANCE = 1 / 16
 
 -- Fraction of squared distance removed along the tile normal. Keeping this below 1 keeps rising
 -- vertices inside a held brush without over-extending reach on steep slopes.
@@ -88,9 +100,22 @@ type Item = {
 	world: { Vector3 },
 	-- Larger of the two grid spacing dimensions in studs.
 	spacing: number,
+	-- Distance from a grid cell's center to its corners, in studs.
+	cellRadius: number,
+	worldNormal: Vector3,
 }
 
 type Move = { item: Item, index: number, vector: Vector3 }
+
+-- Per-vertex accumulation over a frame's path samples.
+type Hit = {
+	-- Raise/Lower weight summed over samples (falloff in area mode, 1 per point-mode sample).
+	summed: number,
+	-- Nearest area-mode squared distance, for Smooth and Raise To falloff.
+	nearest2: number,
+	-- Point-mode samples that snapped to this vertex.
+	pointHits: number,
+}
 
 -- Spatial hash of smoothing candidates in `cell`-sized cubes so each vertex queries only
 -- overlapping cells rather than scanning every candidate (thousands vs. millions of checks).
@@ -138,6 +163,27 @@ local function distanceToBounds(point: Vector3, min: Vector3, max: Vector3): num
 	return (point - point:Max(min):Min(max)).Magnitude
 end
 
+-- Distance from a grid cell's center to its corners. Uses the longer of each pair of opposite
+-- tile edges, so skewed tiles never understate their cells.
+local function cellRadiusOf(opened: Opened): number
+	local c = opened.disp.corners
+	local steps = opened.disp.size - 1
+	local su = math.max((c[4] - c[1]).Magnitude, (c[3] - c[2]).Magnitude) / steps
+	local sv = math.max((c[2] - c[1]).Magnitude, (c[3] - c[4]).Magnitude) / steps
+
+	return 0.5 * math.sqrt(su * su + sv * sv)
+end
+
+-- The radius below which the brush works in point mode on `opened`: POINT_SHARE of the cell's
+-- RMS spacing (the cell size on a square grid, about 5.8 rather than 8 on an 8 x 2 cell).
+function Paint.pointThreshold(opened: Opened): number
+	return cellRadiusOf(opened) * math.sqrt(2) * POINT_SHARE
+end
+
+function Paint.isPointMode(opened: Opened, radius: number): boolean
+	return radius < Paint.pointThreshold(opened) - 1e-3
+end
+
 -- Collects tiles whose bounding box comes within `reach` studs of `center`, caching world positions.
 local function gather(targets: { Opened }, center: Vector3, reach: number): { Item }
 	local items: { Item } = {}
@@ -168,6 +214,8 @@ local function gather(targets: { Opened }, center: Vector3, reach: number): { It
 			positions = positions,
 			world = world,
 			spacing = spacing,
+			cellRadius = cellRadiusOf(opened),
+			worldNormal = pivot:VectorToWorldSpace(faceNormal),
 		})
 	end
 
@@ -295,28 +343,203 @@ local function spacingOf(opened: Opened): number
 	return math.max((c[4] - c[1]).Magnitude, (c[2] - c[1]).Magnitude) / (opened.disp.size - 1)
 end
 
--- Effective brush radius on `opened`, clamped below by grid spacing (also displayed by the cursor ring).
-function Paint.effectiveRadius(opened: Opened, brush: Brush): number
-	local soft = brush.effect == "Smooth" or brush.falloff == "Soft"
+-- How far point mode looks for a point around a sample on `item`.
+local function snapReach(item: Item, radius: number): number
+	return math.max(radius, item.cellRadius * SNAP_SHARE)
+end
 
-	return math.max(brush.radius, spacingOf(opened) * (if soft then MIN_SOFT_STEPS else MIN_HARD_STEPS))
+-- The tile a sample belongs to: the one whose bounds it is inside (or nearest), preferring
+-- `owner` (the tile under the cursor) on ties such as a seam.
+local function ownerOf(items: { Item }, center: Vector3, owner: Opened?): Item?
+	local best: Item? = nil
+	local bestGap = math.huge
+
+	for _, item in items do
+		local gap = distanceToBounds(item.pivot:PointToObjectSpace(center), item.opened.boundsMin, item.opened.boundsMax)
+
+		if item.opened == owner then
+			gap -= 1e-3
+		end
+
+		if gap < bestGap then
+			best, bestGap = item, gap
+		end
+	end
+
+	return best
+end
+
+local function isEdgeIndex(disp: Displacement.Displacement, index: number): boolean
+	local k = index - 1
+	local size = disp.size
+	local row, col = k // size, k % size
+
+	return row == 0 or col == 0 or row == size - 1 or col == size - 1
+end
+
+-- Whether a point cannot be moved on its own: every triangle around it is a hole, or it is a
+-- denser tile's in-between point along a coarser neighbor's 2:1 edge (no twin, but lying inside
+-- the neighbor's edge), which live sewing would put straight back.
+local function isFollower(items: { Item }, item: Item, index: number): boolean
+	local disp = item.opened.disp
+	local open = false
+
+	for _, t in Displacement.trianglesTouching(disp, { [index] = true }) do
+		if not Displacement.isHole(disp, t) then
+			open = true
+			break
+		end
+	end
+
+	if not open then
+		return true
+	end
+
+	if not isEdgeIndex(disp, index) then
+		return false
+	end
+
+	local p = item.world[index]
+
+	for _, other in items do
+		if other ~= item then
+			for _, q in other.world do
+				if (q - p).Magnitude <= TWIN_DISTANCE then
+					return false
+				end
+			end
+		end
+	end
+
+	for _, other in items do
+		if other == item then
+			continue
+		end
+
+		for _, edge in Displacement.edges(other.opened.disp) do
+			local indices = edge.indices
+
+			for k = 1, #indices - 1 do
+				local a, b = other.world[indices[k]], other.world[indices[k + 1]]
+				local ab = b - a
+				local length2 = ab:Dot(ab)
+
+				if length2 < 1e-9 then
+					continue
+				end
+
+				local t = (p - a):Dot(ab) / length2
+
+				if math.sqrt(length2) * math.min(t, 1 - t) > TWIN_DISTANCE and (p - (a + ab * t)).Magnitude <= TWIN_DISTANCE then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+-- Point mode for one sample: the nearest kept, movable point within reach (measured with the
+-- owner tile's normal discounted, like area mode), plus its seam twins. Returns nil when no such
+-- point is near, and whether a removed point was (for the simplified-area warning).
+local function snapIn(items: { Item }, center: Vector3, owner: Item, radius: number): (Snap?, boolean)
+	local reach = snapReach(owner, radius)
+	local reach2 = reach * reach
+	local normal = owner.worldNormal
+	type Candidate = { item: Item, index: number, d2: number }
+	local candidates: { Candidate } = {}
+	local reachedRemoved = false
+
+	for _, item in items do
+		local removed = item.opened.disp.removed
+
+		for index, p in item.world do
+			local offset = p - center
+			local axial = offset:Dot(normal)
+			local d2 = offset:Dot(offset) - AXIAL_SHARE * axial * axial
+
+			if d2 < reach2 then
+				if removed[index] then
+					reachedRemoved = true
+				else
+					table.insert(candidates, { item = item, index = index, d2 = d2 })
+				end
+			end
+		end
+	end
+
+	table.sort(candidates, function (x: Candidate, y: Candidate)
+		return x.d2 < y.d2
+	end)
+
+	for _, candidate in candidates do
+		if isFollower(items, candidate.item, candidate.index) then
+			continue
+		end
+
+		local position = candidate.item.world[candidate.index]
+		local points = {}
+
+		for _, item in items do
+			local removed = item.opened.disp.removed
+
+			for index, q in item.world do
+				if not removed[index] and (q - position).Magnitude <= TWIN_DISTANCE then
+					table.insert(points, { opened = item.opened, index = index })
+				end
+			end
+		end
+
+		return { points = points, position = position }, false
+	end
+
+	return nil, reachedRemoved
+end
+
+-- The point(s) the brush would move around `center` in point mode, or nil when `owner` is not in
+-- point mode or no movable point is near. Used for the cursor marker and Raise To height picking,
+-- through the same rules as Paint.apply.
+function Paint.snap(targets: { Opened }, center: Vector3, brush: Brush, owner: Opened): Snap?
+	if not Paint.isPointMode(owner, brush.radius) then
+		return nil
+	end
+
+	local items = gather(targets, center, math.max(brush.radius, cellRadiusOf(owner) * SNAP_SHARE) + TWIN_DISTANCE)
+	local ownerItem = ownerOf(items, center, owner)
+
+	if not ownerItem then
+		return nil
+	end
+
+	local snap = snapIn(items, center, ownerItem, brush.radius)
+	return snap
 end
 
 -- Applies one brush tick along world-space path `centers` to `targets` over frame time `dt`,
--- returning modified vertex indices per tile, and whether the brush reached only points that
--- were removed (the Mesh tool). Removed points are skipped: they follow the shown surface and
--- would snap straight back, so a stroke over only removed points changes nothing.
+-- returning modified vertex indices per tile, whether the brush reached only points that were
+-- removed (the Mesh tool), and the point-mode target of the last sample. Removed points are
+-- skipped: they follow the shown surface and would snap straight back, so a stroke over only
+-- removed points changes nothing.
+--
+-- Each sample works in area mode (every point inside the real radius, weighted by falloff) or,
+-- where the radius is below its tile's point threshold, point mode (the nearest point at full
+-- weight). `owner` is the tile under the cursor, preferred where a sample sits on a seam. A
+-- `held` target replaces point-mode snapping while the cursor holds still, so a point rising
+-- under a held brush is never traded for a neighbor that now measures closer.
 function Paint.apply(
 	targets: { Opened },
 	centers: { Vector3 },
 	brush: Brush,
-	dt: number
-): ({ [Opened]: { [number]: true } }, boolean)
+	dt: number,
+	owner: Opened?,
+	held: Snap?
+): ({ [Opened]: { [number]: true } }, boolean, Snap?)
 	if #centers == 0 then
-		return {}, false
+		return {}, false, nil
 	end
 
-	-- Single gather covering the entire frame path and widest effective radius.
+	-- Single gather covering the entire frame path, the radius, and point-mode snapping.
 	local first, last = centers[1], centers[#centers]
 	local middle = (first + last) / 2
 	local halfSpan = (last - first).Magnitude / 2
@@ -325,12 +548,12 @@ function Paint.apply(
 
 	for _, opened in targets do
 		maxSpacing = math.max(maxSpacing, spacingOf(opened))
-		maxRadius = math.max(maxRadius, Paint.effectiveRadius(opened, brush))
+		maxRadius = math.max(maxRadius, cellRadiusOf(opened) * SNAP_SHARE)
 	end
 
 	-- Smoothing also reads neighbors up to one smoothing neighborhood past the brush rim.
-	local neighborReach = if smoothing then math.max(maxRadius * SMOOTH_RADIUS_SHARE, maxSpacing * SMOOTH_STEPS) else 0
-	local reach = maxRadius + halfSpan + neighborReach
+	local neighborReach = if smoothing then math.max(brush.radius * SMOOTH_RADIUS_SHARE, maxSpacing * SMOOTH_STEPS) else 0
+	local reach = maxRadius + halfSpan + neighborReach + TWIN_DISTANCE
 	local items = gather(targets, middle, reach)
 	local grid: Grid? = nil
 
@@ -342,46 +565,106 @@ function Paint.apply(
 
 	-- Compute all vertex moves before writing so smoothing evaluates only the pre-tick surface.
 	local moves: { Move } = {}
-
+	local radius = brush.radius
+	local r2 = radius * radius
+	local hits: { [Item]: { [number]: Hit } } = {}
 	local reachedRemoved, reachedKept = false, false
+	local lastSnap: Snap? = nil
+
+	local function hitOf(item: Item, index: number): Hit
+		local list = hits[item]
+
+		if not list then
+			list = {}
+			hits[item] = list
+		end
+
+		local hit = list[index]
+
+		if not hit then
+			hit = { summed = 0, nearest2 = math.huge, pointHits = 0 }
+			list[index] = hit
+		end
+
+		return hit
+	end
+
+	local itemOf: { [Opened]: Item } = {}
 
 	for _, item in items do
-		local disp = item.opened.disp
-		local radius = Paint.effectiveRadius(item.opened, brush)
-		local r2 = radius * radius
-		-- Scale strength proportionally when effectiveRadius was clamped up to the grid step.
-		local gentleness = math.min(1, brush.radius / radius)
-		local worldNormal = item.pivot:VectorToWorldSpace(item.faceNormal)
+		itemOf[item.opened] = item
+	end
 
-		for index, p in item.world do
-			-- Raise/Lower sum all path samples (additive); Smooth and Raise To use the nearest sample.
-			local nearest2 = math.huge
-			local summed = 0
+	for _, center in centers do
+		local ownerItem = ownerOf(items, center, owner)
 
-			for _, center in centers do
+		if ownerItem and Paint.isPointMode(ownerItem.opened, radius) then
+			local snap = held
+
+			if not snap then
+				local found, removedNear = snapIn(items, center, ownerItem, radius)
+				snap = found
+				reachedRemoved = reachedRemoved or removedNear
+			end
+
+			if snap then
+				reachedKept = true
+				lastSnap = snap
+
+				for _, point in snap.points do
+					local item = itemOf[point.opened]
+
+					if item then
+						local hit = hitOf(item, point.index)
+						hit.summed += 1
+						hit.pointHits += 1
+					end
+				end
+			end
+
+			continue
+		end
+
+		for _, item in items do
+			local removed = item.opened.disp.removed
+			local worldNormal = item.worldNormal
+
+			for index, p in item.world do
 				local offset = p - center
 				local axial = offset:Dot(worldNormal)
 				local d2 = offset:Dot(offset) - AXIAL_SHARE * axial * axial
 
-				if d2 < r2 then
-					nearest2 = math.min(nearest2, d2)
-					summed += if brush.falloff == "Soft" then softFalloff(d2, r2) else 1
+				if d2 >= r2 then
+					continue
 				end
+
+				if removed[index] then
+					reachedRemoved = true
+					continue
+				end
+
+				reachedKept = true
+
+				local hit = hitOf(item, index)
+				hit.nearest2 = math.min(hit.nearest2, d2)
+				hit.summed += if brush.falloff == "Soft" then softFalloff(d2, r2) else 1
 			end
+		end
+	end
 
-			if nearest2 >= r2 then
-				continue
-			end
+	for item, list in hits do
+		local disp = item.opened.disp
 
-			if disp.removed[index] then
-				reachedRemoved = true
-				continue
-			end
-
-			reachedKept = true
-
+		for index, hit in list do
+			-- Smooth and Raise To ease by the nearest area sample's falloff or by the share of
+			-- samples that snapped here, so a fast drag over several points splits the time.
+			local weight = math.max(
+				if hit.nearest2 < r2 then softFalloff(hit.nearest2, r2) else 0,
+				hit.pointHits / #centers
+			)
 			local axis = localAxis(item, brush, index)
 			local current = Displacement.fieldVector(disp, index)
+			local p = item.world[index]
 			local vector: Vector3
 
 			if brush.effect == "RaiseTo" then
@@ -410,18 +693,18 @@ function Paint.apply(
 					-- Hammer's absolute mode: jump directly to the target height.
 					vector = target
 				else
-					local alpha = 1 - math.exp(-brush.strength * RAISE_TO_RATE * softFalloff(nearest2, r2) * gentleness * dt)
+					local alpha = 1 - math.exp(-brush.strength * RAISE_TO_RATE * weight * dt)
 					vector = current:Lerp(target, alpha)
 				end
 			elseif grid then
 				local smoothRadius = math.max(radius * SMOOTH_RADIUS_SHARE, item.spacing * SMOOTH_STEPS)
 				local unitAxis = if axis.Magnitude > 1e-6 then axis.Unit else item.faceNormal
 				local h = smoothHeight(grid, p, item.pivot:VectorToWorldSpace(unitAxis), smoothRadius)
-				vector = current + unitAxis * (h * approach(smoothRate, dt) * softFalloff(nearest2, r2) * gentleness)
+				vector = current + unitAxis * (h * approach(smoothRate, dt) * weight)
 			else
+				-- Raise/Lower sum all path samples (additive), averaged over the frame's samples.
 				local sign = if brush.effect == "Raise" then 1 else -1
-				local weight = summed / #centers
-				vector = current + axis * (sign * brush.strength * weight * gentleness * dt)
+				vector = current + axis * (sign * brush.strength * (hit.summed / #centers) * dt)
 			end
 
 			if (vector - current).Magnitude > MIN_MOVE then
@@ -446,7 +729,7 @@ function Paint.apply(
 		set[move.index] = true
 	end
 
-	return changed, reachedRemoved and not reachedKept
+	return changed, reachedRemoved and not reachedKept, lastSnap
 end
 
 -- Samples the Raise To height of `point` (world space) on `opened`: studs along the brush axis

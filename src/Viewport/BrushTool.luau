@@ -26,9 +26,12 @@
 	  per frame.
 
 	Centers on the exact surface point under the cursor (unlike Hammer's nearest-vertex snap) for
-	smoother tracking in Studio.
+	smoother tracking in Studio. The ring is always the real radius; below a tile's grid size the
+	brush works in point mode (Paint.isPointMode), moving the nearest point, which a marker shows.
+	While the cursor holds still the same point keeps moving, even once a neighbor measures closer.
 ]]
 
+local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
@@ -90,6 +93,9 @@ local NORMAL_FOLLOW = 24
 
 local SEPARATOR = KeyStrip.SEPARATOR
 
+-- Posted when a stroke changed nothing because every point it moved is pinned to a part.
+local PINNED_TEXT = "Nothing moved because those points are pinned to a part; turn off Keep edges stitched in Settings to sculpt them."
+
 local MODE_COLORS: { [Paint.Effect]: Color3 } = {
 	Raise = Color3.fromRGB(96, 200, 96),
 	Lower = Color3.fromRGB(230, 96, 80),
@@ -97,17 +103,17 @@ local MODE_COLORS: { [Paint.Effect]: Color3 } = {
 	RaiseTo = Color3.fromRGB(230, 190, 70),
 }
 
--- The brush size label. The brush always reaches one grid step (Paint.effectiveRadius), so a
--- smaller Radius says how far it really reaches instead of leaving a larger ring unexplained.
-local function sizeText(radius: number, effective: number): string
-	if effective > radius + 1e-3 then
-		return `Radius {Format.studs(radius)} st (reaches {Format.studs(effective)} at this Detail)`
+-- The brush size label. In point mode (Paint.isPointMode) the brush moves the single nearest
+-- point, so the label says so.
+local function sizeText(radius: number, pointMode: boolean): string
+	if pointMode then
+		return `Radius {Format.studs(radius)} st (1 point)`
 	end
 
 	return `Radius {Format.studs(radius)} st`
 end
 
-local function keyHints(mode: Paint.Effect, settings: Settings.State, effective: number): string
+local function keyHints(mode: Paint.Effect, settings: Settings.State, pointMode: boolean): string
 	local parts: { string }
 
 	if mode == "Raise" or mode == "Lower" then
@@ -128,9 +134,7 @@ local function keyHints(mode: Paint.Effect, settings: Settings.State, effective:
 		}
 	end
 
-	local size = if effective > settings.radius + 1e-3
-		then `{Format.studs(settings.radius)}, grid min {Format.studs(math.round(effective * 10) / 10)}`
-		else Format.studs(settings.radius)
+	local size = if pointMode then `{Format.studs(settings.radius)}, 1 point` else Format.studs(settings.radius)
 
 	table.insert(parts, `Ctrl + Scroll: Size ({size})`)
 	table.insert(parts, "Alt + Right Click: Axis")
@@ -189,6 +193,10 @@ return function (plugin: Plugin): () -> ()
 	local resize: Input.DragResize? = nil
 	-- Whether the current stroke reached points removed by the Mesh tool (see endStroke).
 	local strokeReachedRemoved = false
+	-- Point mode: the point(s) the last sample moved, reused while the cursor holds still.
+	local heldSnap: Paint.Snap? = nil
+	-- The previous frame's mouse ray, to tell a held cursor from a moving one.
+	local lastRay: Ray? = nil
 	local wasPainting = false
 
 	-- Depth-tested primary ring plus a faint always-on-top ghost ring so the cursor stays
@@ -197,9 +205,19 @@ return function (plugin: Plugin): () -> ()
 	local ghost = RadiusPreview.newRing("StrataBrushGhost", true, 0.78)
 	local keyStrip = KeyStrip.new("StrataKeyHints")
 
+	-- Point mode marker: the point the brush will move, drawn on top so it is never hidden.
+	local marker = Instance.new("SphereHandleAdornment")
+	marker.Name = "StrataBrushPoint"
+	marker.Adornee = workspace.Terrain
+	marker.AlwaysOnTop = true
+	marker.ZIndex = 3
+	marker.Visible = false
+	marker.Parent = CoreGui
+
 	local function hideCursor()
 		ring.Visible = false
 		ghost.Visible = false
+		marker.Visible = false
 		RadiusPreview.label(nil)
 	end
 
@@ -275,7 +293,48 @@ return function (plugin: Plugin): () -> ()
 		}
 	end
 
-	local function applyBrush(models: { Model }, hit: Hit, mode: Paint.Effect, dt: number)
+	local function pointModeAt(hit: Hit?, settings: Settings.State): boolean
+		local opened = if hit then hit.opened else nil
+
+		return opened ~= nil and Paint.isPointMode(opened, settings.radius)
+	end
+
+	-- The point(s) a stroke would move at `hit` in point mode, by the same rules as Paint.apply.
+	local function snapAt(models: { Model }, hit: Hit, mode: Paint.Effect, settings: Settings.State): Paint.Snap?
+		local opened = hit.opened
+
+		if not opened or not Paint.isPointMode(opened, settings.radius) then
+			return nil
+		end
+
+		-- Peek rather than get so hovering does not open every tile in the place.
+		local targets = { opened }
+
+		for _, model in models do
+			local other = Session.peek(model)
+
+			if other and other ~= opened then
+				table.insert(targets, other)
+			end
+		end
+
+		return Paint.snap(targets, hit.position, brushFor(mode, settings), opened)
+	end
+
+	-- Where a snapped point is now (it may have risen since it was snapped).
+	local function livePosition(snap: Paint.Snap): Vector3?
+		local point = snap.points[1]
+
+		if not point then
+			return nil
+		end
+
+		return point.opened.model:GetPivot() * Displacement.position(point.opened.disp, point.index)
+	end
+
+	-- `stationary`: the mouse ray has not moved since the last frame, so point mode keeps moving
+	-- the same point even as it rises and a neighbor comes to measure closer.
+	local function applyBrush(models: { Model }, hit: Hit, mode: Paint.Effect, dt: number, stationary: boolean)
 		local settings = Settings.get()
 		local center = hit.position
 		-- Compare against the hit tile's base face normal rather than the sculpted triangle normal
@@ -285,9 +344,10 @@ return function (plugin: Plugin): () -> ()
 			then hitOpened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(hitOpened.disp))
 			else hit.normal
 		local brush = brushFor(mode, settings)
-		local effective = if hitOpened then Paint.effectiveRadius(hitOpened, brush) else settings.radius
-		-- Margin covers the effective radius and Smooth's neighbor neighborhood across seams.
-		local reach = effective * 2.5 + (if lastCenter then (center - lastCenter).Magnitude else 0)
+		-- Gathering never shrinks with a small ring: point mode snaps up to about a grid step away,
+		-- and seam twins and Smooth's neighbors across a seam must stay included.
+		local grid = if hitOpened then Paint.pointThreshold(hitOpened) else 0
+		local reach = math.max(settings.radius, grid) * 2.5 + (if lastCenter then (center - lastCenter).Magnitude else 0)
 		local targets: { Opened } = {}
 
 		for _, opened in Session.getAll(models) do
@@ -336,7 +396,7 @@ return function (plugin: Plugin): () -> ()
 
 		if previous then
 			local distance = (center - previous).Magnitude
-			local step = math.max(effective * STEP_SHARE, MIN_STEP)
+			local step = math.max(settings.radius * STEP_SHARE, MIN_STEP)
 			local steps = math.clamp(math.ceil(distance / step), 1, MAX_STEPS)
 
 			if steps > 1 then
@@ -350,7 +410,13 @@ return function (plugin: Plugin): () -> ()
 
 		lastCenter = center
 
-		local changed, reachedRemoved = Paint.apply(targets, centers, brush, dt)
+		local changed, reachedRemoved, snap = Paint.apply(targets, centers, brush, dt, hitOpened, if stationary then heldSnap else nil)
+
+		if snap then
+			heldSnap = snap
+		elseif not stationary then
+			heldSnap = nil
+		end
 
 		if reachedRemoved then
 			strokeReachedRemoved = true
@@ -459,7 +525,8 @@ return function (plugin: Plugin): () -> ()
 			return
 		end
 
-		local hit = findHit(Query.workingModels())
+		local models = Query.workingModels()
+		local hit = findHit(models)
 		local opened = if hit then hit.opened else nil
 
 		if not hit or not opened then
@@ -467,7 +534,10 @@ return function (plugin: Plugin): () -> ()
 			return
 		end
 
-		local height = math.round(Paint.heightAt(opened, hit.position, brushFor("RaiseTo", settings)) * 10) / 10
+		-- In point mode the marked point is what Raise To will set, so its height is the one picked.
+		local snap = snapAt(models, hit, "RaiseTo", settings)
+		local point = if snap then livePosition(snap) else nil
+		local height = math.round(Paint.heightAt(opened, point or hit.position, brushFor("RaiseTo", settings)) * 10) / 10
 
 		Settings.update(function (s)
 			s.height = height
@@ -519,6 +589,7 @@ return function (plugin: Plugin): () -> ()
 		end
 
 		lastCenter = nil
+		heldSnap = nil
 
 		-- Apply an immediate dab on mouse-down so quick clicks always take effect.
 		local models = Query.workingModels()
@@ -526,7 +597,7 @@ return function (plugin: Plugin): () -> ()
 
 		if hit then
 			lastHit = hit
-			applyBrush(models, hit, effectiveMode(settings.mode), TAP_DT)
+			applyBrush(models, hit, effectiveMode(settings.mode), TAP_DT, false)
 		end
 	end
 
@@ -562,12 +633,14 @@ return function (plugin: Plugin): () -> ()
 		end
 
 		local strokePins = pins
+		local startOf = table.clone(snapshots)
 		pins = {}
 		propagated = {}
 		table.clear(pinChecked)
 		table.clear(snapshots)
 		table.clear(snapshotList)
 		lastCenter = nil
+		heldSnap = nil
 
 		local reachedRemoved = strokeReachedRemoved
 		strokeReachedRemoved = false
@@ -588,6 +661,43 @@ return function (plugin: Plugin): () -> ()
 
 		if Settings.get().autosew then
 			ok, err = pcall(Edges.autosew, edited, strokePins)
+		end
+
+		-- Pinned part edges (Keep edges stitched) are put back every frame, so a stroke over only
+		-- pinned points, such as point mode on a stitched edge, ends where it started.
+		local netMoved = false
+
+		for _, opened in edited do
+			local start = startOf[opened]
+
+			if not start then
+				netMoved = true
+				break
+			end
+
+			local pivot = opened.model:GetPivot()
+
+			for index, before in start.world do
+				if (pivot * Displacement.position(opened.disp, index) - before).Magnitude > 1e-4 then
+					netMoved = true
+					break
+				end
+			end
+
+			if netMoved then
+				break
+			end
+		end
+
+		if ok and not netMoved then
+			ChangeHistoryService:FinishRecording(current, Enum.FinishRecordingOperation.Cancel)
+			Session.clear()
+
+			if Settings.get().stitchParts then
+				Status.post("warning", PINNED_TEXT)
+			end
+
+			return
 		end
 
 		ChangeHistoryService:FinishRecording(current, Enum.FinishRecordingOperation.Commit)
@@ -637,17 +747,13 @@ return function (plugin: Plugin): () -> ()
 		table.insert(connections, connection)
 	end
 
-	local function effectiveAt(hit: Hit?, mode: Paint.Effect, settings: Settings.State): number
-		local opened = if hit then hit.opened else nil
-
-		return if opened then Paint.effectiveRadius(opened, brushFor(mode, settings)) else settings.radius
-	end
-
-	local function placeCursor(position: Vector3, normal: Vector3, settings: Settings.State, mode: Paint.Effect, radius: number)
+	-- The ring is always the real radius. In point mode it dims so the marker leads the eye.
+	local function placeCursor(position: Vector3, normal: Vector3, settings: Settings.State, mode: Paint.Effect, pointMode: boolean)
 		local up = if math.abs(normal.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
 		local frame = CFrame.lookAt(position + normal * 0.05, position + normal * 2, up)
+		local radius = settings.radius
 		-- Scale ring thickness with radius so it remains visible at every brush size.
-		local width = math.max(0.15, radius * 0.04)
+		local width = math.max(0.12, radius * 0.04)
 		local color = MODE_COLORS[mode]
 
 		for _, adornment in { ring, ghost } do
@@ -658,9 +764,31 @@ return function (plugin: Plugin): () -> ()
 			adornment.Visible = true
 		end
 
-		-- Dim slightly while dragging or when clamped up to grid minimum so terrain stays clear.
-		local widened = radius > settings.radius + 1e-3
-		ring.Transparency = if recording then 0.45 elseif widened then 0.38 else 0.2
+		-- Dim slightly while dragging so terrain stays clear.
+		ring.Transparency = if pointMode
+			then (if recording then 0.6 else 0.45)
+			elseif recording then 0.45
+			else 0.2
+	end
+
+	-- Shows the point mode marker on the point(s) of `snap` (where they are now), or hides it.
+	local function showMarker(snap: Paint.Snap?, mode: Paint.Effect)
+		local position = if snap then livePosition(snap) else nil
+
+		if not position then
+			marker.Visible = false
+			return
+		end
+
+		local camera = workspace.CurrentCamera
+		local distance = if camera then (camera.CFrame.Position - position).Magnitude else 50
+		marker.CFrame = CFrame.new(position)
+		-- Sized by camera distance rather than radius, so it stays visible zoomed out over a coarse
+		-- grid without dwarfing a 1-stud ring up close.
+		marker.Radius = math.clamp(distance * 0.008, 0.14, 0.45)
+		marker.Color3 = MODE_COLORS[mode]
+		marker.Transparency = if recording then 0.35 else 0.1
+		marker.Visible = true
 	end
 
 	table.insert(
@@ -673,7 +801,14 @@ return function (plugin: Plugin): () -> ()
 			end
 
 			local mode: Paint.Effect = effectiveMode(settings.mode)
-			keyStrip.show(if settings.showKeyHints then keyHints(mode, settings, effectiveAt(lastHit, mode, settings)) else nil)
+			keyStrip.show(if settings.showKeyHints then keyHints(mode, settings, pointModeAt(lastHit, settings)) else nil)
+
+			local ray = mouse.UnitRay
+			local previousRay = lastRay
+			local stationary = previousRay ~= nil
+				and (ray.Origin - previousRay.Origin).Magnitude < 1e-4
+				and (ray.Direction - previousRay.Direction).Magnitude < 1e-5
+			lastRay = ray
 
 			local resizing = resize
 
@@ -689,12 +824,15 @@ return function (plugin: Plugin): () -> ()
 				end
 
 				-- Anchor the preview ring where the resize drag began with a live size readout.
-				local held = lastHit or findHit(Query.workingModels(), resizing.ray)
+				local resizeModels = Query.workingModels()
+				local held = lastHit or findHit(resizeModels, resizing.ray)
 
 				if held then
 					local current = Settings.get()
-					placeCursor(held.position, displayNormal or held.normal, current, mode, effectiveAt(held, mode, current))
-					RadiusPreview.label(held.position, sizeText(current.radius, effectiveAt(held, mode, current)))
+					local pointMode = pointModeAt(held, current)
+					placeCursor(held.position, displayNormal or held.normal, current, mode, pointMode)
+					showMarker(snapAt(resizeModels, held, mode, current), mode)
+					RadiusPreview.label(held.position, sizeText(current.radius, pointMode))
 				end
 
 				return
@@ -705,19 +843,21 @@ return function (plugin: Plugin): () -> ()
 
 			-- Preview brush size in the viewport center right after adjusting the panel slider.
 			if RadiusPreview.active() and not recording then
-				local ray = RadiusPreview.ray()
-				local previewHit = if ray then findHit(models, ray) else nil
+				local previewRay = RadiusPreview.ray()
+				local previewHit = if previewRay then findHit(models, previewRay) else nil
 				local text = `Radius {Format.studs(settings.radius)} st`
 
 				if previewHit then
-					local effective = effectiveAt(previewHit, mode, settings)
-					placeCursor(previewHit.position, previewHit.normal, settings, mode, effective)
-					RadiusPreview.label(previewHit.position, sizeText(settings.radius, effective))
+					local pointMode = pointModeAt(previewHit, settings)
+					placeCursor(previewHit.position, previewHit.normal, settings, mode, pointMode)
+					showMarker(snapAt(models, previewHit, mode, settings), mode)
+					RadiusPreview.label(previewHit.position, sizeText(settings.radius, pointMode))
 				else
 					local position, facing = RadiusPreview.fallback(settings.radius)
+					marker.Visible = false
 
 					if position and facing then
-						placeCursor(position, facing, settings, mode, settings.radius)
+						placeCursor(position, facing, settings, mode, false)
 						RadiusPreview.label(position, text)
 					end
 				end
@@ -747,7 +887,7 @@ return function (plugin: Plugin): () -> ()
 			end
 
 			displayNormal = shown.Unit
-			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, effectiveAt(hit, mode, settings))
+			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, pointModeAt(hit, settings))
 
 			if recording then
 				local stepDt = math.min(dt, MAX_DT)
@@ -758,8 +898,12 @@ return function (plugin: Plugin): () -> ()
 					clampNext = false
 				end
 
-				applyBrush(models, hit, mode, stepDt)
+				applyBrush(models, hit, mode, stepDt, stationary)
 			end
+
+			-- During a stroke the marker follows the point being moved; otherwise the point a stroke
+			-- would move here.
+			showMarker(if recording then heldSnap else snapAt(models, hit, mode, settings), mode)
 		end)
 	)
 
@@ -775,6 +919,7 @@ return function (plugin: Plugin): () -> ()
 
 		ring:Destroy()
 		ghost:Destroy()
+		marker:Destroy()
 		keyStrip.destroy()
 	end
 end

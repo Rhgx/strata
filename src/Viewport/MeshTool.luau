@@ -296,8 +296,7 @@ return function (plugin: Plugin): () -> ()
 	end
 
 	-- How far a Simplify drag reaches: the Radius, but at least most of a grid step, so a drag
-	-- with a small radius still marks the nearest point instead of nothing (like the sculpt
-	-- brushes, which always reach one grid step).
+	-- with a small radius still marks the nearest point instead of nothing.
 	local function markReach(opened: Opened, radius: number): number
 		local c = opened.disp.corners
 		local spacing = math.max((c[4] - c[1]).Magnitude, (c[2] - c[1]).Magnitude) / (opened.disp.size - 1)
