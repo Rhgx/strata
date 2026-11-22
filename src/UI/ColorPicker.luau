@@ -41,12 +41,25 @@ local SQUARE_HEIGHT = 140
 local HUE_HEIGHT = 12
 local KNOB = 10
 
--- Hexagons are 14 x 16, 8 px apart across alternating rows and 14 px apart down (Studio's grid).
-local HEX_W, HEX_H = 14, 16
-local STEP_X, STEP_Y = 8, 14
-local OUTLINE = 4
+-- Hexagons are 17 x 20, 9 px apart across alternating rows (18 px pitch, 1 px seams) and 16 px
+-- apart down, matching Studio's BrickColor palette.
+local HEX_W, HEX_H = 17, 20
+local STEP_X, STEP_Y = 9, 16
 -- Rows in the hexagon. The middle row holds 13 colors, the top and bottom rows 7: 127 in all.
 local GRID_ROWS = 13
+local GRAYS_GAP = 8
+-- Ring image extends 1 px past each side of the swatch so the outer dark fringe fits unclipped.
+local RING_W, RING_H = HEX_W + 2, HEX_H + 2
+local HEX_SCALE = 4
+local HOVER_RING_TRANSPARENCY = 0.4
+-- Ring profile in display pixels measured outward from the swatch edge (0): a ~2 px pure white
+-- stroke framed by a dark fringe so it reads on white swatches and in the Light theme.
+local RING_INNER_FRINGE = -2.2
+local RING_WHITE_INNER = -1.7
+local RING_WHITE_OUTER = 0.2
+local RING_OUTER_FRINGE = 0.8
+local RING_INNER_FRINGE_ALPHA = 0.55
+local RING_OUTER_FRINGE_ALPHA = 0.65
 
 -- Studio's BrickColor palette, by BrickColor number in Studio's order.
 local PALETTE = {
@@ -63,33 +76,33 @@ local GRAYS = { 199, 194, 1002, 325, 348, 26, 302, 311, 320, 335, 1001, 1 }
 
 type Cell = { brick: BrickColor, center: Vector2 }
 
--- Cell centers inside the hexagon grid, filled row by row like Studio's.
-local cells: { Cell } = {}
+-- Cell centers inside the main hexagon and the 12 grays centered below it, in Studio's order.
+local GRID_SIZE = Vector2.new((2 * GRID_ROWS - 2) * STEP_X + HEX_W, (GRID_ROWS - 1) * STEP_Y + HEX_H)
+local PALETTE_SIZE = Vector2.new(GRID_SIZE.X, GRID_SIZE.Y + GRAYS_GAP + HEX_H)
+
+local paletteCells: { Cell } = {}
 do
 	local midRow = math.floor(GRID_ROWS / 2)
 	local midCol = GRID_ROWS - 1
 	for row = 0, GRID_ROWS - 1 do
 		for col = 0, 2 * GRID_ROWS - 2 do
 			local inside = math.abs(midRow - row) + math.abs(midCol - col) < GRID_ROWS
-			if inside and row % 2 == col % 2 and #cells < #PALETTE then
-				table.insert(cells, {
-					brick = BrickColor.new(PALETTE[#cells + 1]),
+			if inside and row % 2 == col % 2 and #paletteCells < #PALETTE then
+				table.insert(paletteCells, {
+					brick = BrickColor.new(PALETTE[#paletteCells + 1]),
 					center = Vector2.new(col * STEP_X + HEX_W / 2, row * STEP_Y + HEX_H / 2),
 				})
 			end
 		end
 	end
-end
-local GRID_SIZE = Vector2.new((2 * GRID_ROWS - 2) * STEP_X + HEX_W, (GRID_ROWS - 1) * STEP_Y + HEX_H)
 
-local grayCells: { Cell } = {}
-do
-	local step = math.floor((GRID_SIZE.X - HEX_W) / (#GRAYS - 1))
-	local start = math.floor((GRID_SIZE.X - step * (#GRAYS - 1)) / 2)
+	local grayStep = STEP_X * 2
+	local grayStart = (GRID_SIZE.X - grayStep * (#GRAYS - 1)) / 2
+	local grayY = GRID_SIZE.Y + GRAYS_GAP + HEX_H / 2
 	for i, number in GRAYS do
-		table.insert(grayCells, {
+		table.insert(paletteCells, {
 			brick = BrickColor.new(number),
-			center = Vector2.new(start + step * (i - 1), HEX_H / 2),
+			center = Vector2.new(grayStart + grayStep * (i - 1), grayY),
 		})
 	end
 end
@@ -116,68 +129,169 @@ local lastMode: Mode = "RGB"
 local toHex = Format.hex
 
 --[[
-	A white pointy-top hexagon drawn once into an EditableImage and tinted per swatch, so the
-	palette needs no uploaded image. Nil if EditableImage is unavailable (square swatches then).
+	Two supersampled pointy-top hexagon EditableImages built once and cached: a white fill tinted
+	per swatch, and a white outline ring with a dark fringe for hover and selection. Keeping the
+	EditableImages referenced here prevents GC while Content.fromObject is in use. Nil if
+	EditableImage is unavailable (square swatches with UIStroke outlines then).
 ]]
-local hexagon: { image: EditableImage, content: Content }? = nil
-local hexagonTried = false
-local function hexagonContent(): Content?
-	if hexagonTried then
-		return if hexagon then hexagon.content else nil
-	end
-	hexagonTried = true
-	local width, height = HEX_W * 4, HEX_H * 4
+type HexAssets = {
+	fillImage: EditableImage,
+	fill: Content,
+	ringImage: EditableImage,
+	ring: Content,
+}
+
+local cachedHexAssets: HexAssets? = nil
+local hexAssetsTried = false
+
+local function createEditableImage(width: number, height: number): EditableImage?
 	local ok, image = pcall(function()
 		return AssetService:CreateEditableImage({ Size = Vector2.new(width, height) })
 	end)
 	if not ok or not image then
 		return nil
 	end
-	local halfW, halfH = width / 2, height / 2
-	local pixels = buffer.create(width * height * 4)
-	for y = 0, height - 1 do
-		for x = 0, width - 1 do
+	return image
+end
+
+-- Perpendicular signed distance (in display pixels) from the swatch hexagon's edge.
+local HEX_HALF_W, HEX_HALF_H = HEX_W / 2, HEX_H / 2
+local HEX_DIAG_LEN = math.sqrt((HEX_HALF_H / 2) ^ 2 + HEX_HALF_W ^ 2)
+
+local function hexSignedDistance(dx: number, dy: number): number
+	local dVert = dx - HEX_HALF_W
+	local dDiag = ((HEX_HALF_H / 2) * dx + HEX_HALF_W * dy - HEX_HALF_W * HEX_HALF_H) / HEX_DIAG_LEN
+	return math.max(dVert, dDiag)
+end
+
+local function hexAssets(): HexAssets?
+	if hexAssetsTried then
+		return cachedHexAssets
+	end
+	hexAssetsTried = true
+
+	local fillW, fillH = HEX_W * HEX_SCALE, HEX_H * HEX_SCALE
+	local ringW, ringH = RING_W * HEX_SCALE, RING_H * HEX_SCALE
+	local fillImage = createEditableImage(fillW, fillH)
+	if not fillImage then
+		return nil
+	end
+	local ringImage = createEditableImage(ringW, ringH)
+	if not ringImage then
+		return nil
+	end
+
+	local fillPixels = buffer.create(fillW * fillH * 4)
+	for y = 0, fillH - 1 do
+		for x = 0, fillW - 1 do
 			-- Coverage from 4 x 4 samples, for smooth edges.
 			local covered = 0
 			for sy = 0, 3 do
 				for sx = 0, 3 do
-					local dx = math.abs(x + (sx + 0.5) / 4 - halfW)
-					local dy = math.abs(y + (sy + 0.5) / 4 - halfH)
-					if dx <= halfW and dy <= halfH - halfH / 2 * dx / halfW then
+					local dx = math.abs((x + (sx + 0.5) / 4) / HEX_SCALE - HEX_HALF_W)
+					local dy = math.abs((y + (sy + 0.5) / 4) / HEX_SCALE - HEX_HALF_H)
+					if hexSignedDistance(dx, dy) <= 0 then
 						covered += 1
 					end
 				end
 			end
-			local offset = (y * width + x) * 4
-			buffer.writeu8(pixels, offset, 255)
-			buffer.writeu8(pixels, offset + 1, 255)
-			buffer.writeu8(pixels, offset + 2, 255)
-			buffer.writeu8(pixels, offset + 3, math.round(covered / 16 * 255))
+			local offset = (y * fillW + x) * 4
+			buffer.writeu8(fillPixels, offset, 255)
+			buffer.writeu8(fillPixels, offset + 1, 255)
+			buffer.writeu8(fillPixels, offset + 2, 255)
+			buffer.writeu8(fillPixels, offset + 3, math.round(covered / 16 * 255))
 		end
 	end
-	image:WritePixelsBuffer(Vector2.zero, Vector2.new(width, height), pixels)
-	local content = Content.fromObject(image)
-	hexagon = { image = image, content = content }
-	return content
+	fillImage:WritePixelsBuffer(Vector2.zero, Vector2.new(fillW, fillH), fillPixels)
+
+	local ringHalfW, ringHalfH = RING_W / 2, RING_H / 2
+	local ringPixels = buffer.create(ringW * ringH * 4)
+	for y = 0, ringH - 1 do
+		for x = 0, ringW - 1 do
+			-- Premultiplied accumulation across 4 x 4 samples, unpremultiplied to straight RGBA.
+			local white = 0
+			local alphaSum = 0
+			for sy = 0, 3 do
+				for sx = 0, 3 do
+					local dx = math.abs((x + (sx + 0.5) / 4) / HEX_SCALE - ringHalfW)
+					local dy = math.abs((y + (sy + 0.5) / 4) / HEX_SCALE - ringHalfH)
+					local sd = hexSignedDistance(dx, dy)
+					if sd >= RING_WHITE_INNER and sd <= RING_WHITE_OUTER then
+						white += 1
+						alphaSum += 1
+					elseif sd > RING_WHITE_OUTER and sd <= RING_OUTER_FRINGE then
+						alphaSum += RING_OUTER_FRINGE_ALPHA
+					elseif sd >= RING_INNER_FRINGE and sd < RING_WHITE_INNER then
+						alphaSum += RING_INNER_FRINGE_ALPHA
+					end
+				end
+			end
+			local shade = if alphaSum > 0 then math.round(white / alphaSum * 255) else 0
+			local alpha = math.round(alphaSum / 16 * 255)
+			local offset = (y * ringW + x) * 4
+			buffer.writeu8(ringPixels, offset, shade)
+			buffer.writeu8(ringPixels, offset + 1, shade)
+			buffer.writeu8(ringPixels, offset + 2, shade)
+			buffer.writeu8(ringPixels, offset + 3, alpha)
+		end
+	end
+	ringImage:WritePixelsBuffer(Vector2.zero, Vector2.new(ringW, ringH), ringPixels)
+
+	cachedHexAssets = {
+		fillImage = fillImage,
+		fill = Content.fromObject(fillImage),
+		ringImage = ringImage,
+		ring = Content.fromObject(ringImage),
+	}
+	return cachedHexAssets
 end
 
-local function swatch(content: Content?, center: Vector2, size: Vector2, color: Color3)
-	if content then
+local function swatch(assets: HexAssets?, center: Vector2, color: Color3)
+	if assets then
 		return e("ImageLabel", {
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromOffset(center.X, center.Y),
-			Size = UDim2.fromOffset(size.X, size.Y),
+			Size = UDim2.fromOffset(HEX_W, HEX_H),
 			BackgroundTransparency = 1,
-			ImageContent = content,
+			ImageContent = assets.fill,
 			ImageColor3 = color,
+			ZIndex = 1,
 		})
 	end
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromOffset(center.X, center.Y),
-		Size = UDim2.fromOffset(size.X - 2, size.X - 2),
+		Size = UDim2.fromOffset(HEX_W - 2, HEX_W - 2),
 		BorderSizePixel = 0,
 		BackgroundColor3 = color,
+		ZIndex = 1,
+	})
+end
+
+local function ring(assets: HexAssets?, center: Vector2, zIndex: number, transparency: number)
+	if assets then
+		return e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(center.X, center.Y),
+			Size = UDim2.fromOffset(RING_W, RING_H),
+			BackgroundTransparency = 1,
+			ImageContent = assets.ring,
+			ImageTransparency = transparency,
+			ZIndex = zIndex,
+		})
+	end
+	return e("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(center.X, center.Y),
+		Size = UDim2.fromOffset(HEX_W - 2, HEX_W - 2),
+		BackgroundTransparency = 1,
+		ZIndex = zIndex,
+	}, {
+		Stroke = e("UIStroke", {
+			Color = Color3.new(1, 1, 1),
+			Thickness = 2,
+			Transparency = transparency,
+		}),
 	})
 end
 
@@ -277,7 +391,27 @@ local function ColorPicker(props: Props)
 	end)
 	local hsvRef = React.useRef(hsv)
 	hsvRef.current = hsv
-	local hoverBrick: BrickColor?, setHoverBrick = React.useState(nil :: BrickColor?)
+	local hoverCell: Cell?, setHoverCell = React.useState(nil :: Cell?)
+	local rootRef = React.useRef(nil :: Frame?)
+	local width, setWidth = React.useState(0)
+
+	React.useEffect(function()
+		local frame = rootRef.current
+		if not frame then
+			return function() end
+		end
+		local function sync()
+			local nextWidth = frame.AbsoluteSize.X
+			setWidth(function(previous: number)
+				return if nextWidth == previous then previous else nextWidth
+			end)
+		end
+		local connection = frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(sync)
+		sync()
+		return function()
+			connection:Disconnect()
+		end
+	end, {})
 
 	local current = Color3.fromHSV(hsv[1], hsv[2], hsv[3])
 	local color = props.color
@@ -293,6 +427,9 @@ local function ColorPicker(props: Props)
 
 	local function setMode(value: Mode)
 		lastMode = value
+		if value ~= "Brick" then
+			setHoverCell(nil)
+		end
 		setModeState(value)
 	end
 
@@ -386,14 +523,16 @@ local function ColorPicker(props: Props)
 		})
 	else
 		-- The hovered color's name, or the nearest BrickColor to the current color.
-		local brick = hoverBrick or BrickColor.new(current)
+		local hovered = if hoverCell then hoverCell.brick else nil
+		local brick = hovered or BrickColor.new(current)
 		inputs.Name = e(StudioComponents.Label, {
 			LayoutOrder = 1,
 			Size = UDim2.fromScale(1, 1),
-			Text = if hoverBrick or not color or toHex(brick.Color) == toHex(current)
+			Text = if hovered or not color or toHex(brick.Color) == toHex(current)
 				then brick.Name
 				else `{brick.Name} (nearest)`,
 			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 		})
 	end
 
@@ -492,53 +631,68 @@ local function ColorPicker(props: Props)
 			Capture = hueCapture,
 		})
 	else
-		local content = hexagonContent()
+		local assets = hexAssets()
 		local selectedHex = if color then toHex(current) else nil
-		local outlineColor = theme:GetColor(Enum.StudioStyleGuideColor.DialogMainButton)
-		local hexSize = Vector2.new(HEX_W, HEX_H)
-		local outlineSize = Vector2.new(HEX_W + OUTLINE, HEX_H + OUTLINE)
+		local scale = if width > 0 then math.min(1, width / PALETTE_SIZE.X) else 1
 
-		local function cellsElement(order: number, list: { Cell }, size: Vector2)
-			local swatches: { [string]: unknown } = {}
-			for i, cell in list do
-				local brickColor = cell.brick.Color
-				if selectedHex and toHex(brickColor) == selectedHex then
-					swatches[`Outline{i}`] = swatch(content, cell.center, outlineSize, outlineColor)
-				end
-				swatches[`Cell{i}`] = swatch(content, cell.center, hexSize, brickColor)
+		local swatches: { [string]: unknown } = {
+			Scale = e("UIScale", { Scale = scale }),
+		}
+		for i, cell in paletteCells do
+			local brickColor = cell.brick.Color
+			swatches[`Cell{i}`] = swatch(assets, cell.center, brickColor)
+			if selectedHex and toHex(brickColor) == selectedHex then
+				swatches[`Selected{i}`] = ring(assets, cell.center, 3, 0)
 			end
+		end
+		if hoverCell and not (selectedHex and toHex(hoverCell.brick.Color) == selectedHex) then
+			swatches.Hover = ring(assets, hoverCell.center, 2, HOVER_RING_TRANSPARENCY)
+		end
+
+		local function hitCell(rbx: unknown, value: unknown): Cell?
+			local frame, input = asGui(rbx), asInput(value)
+			if not frame or not input then
+				return nil
+			end
+			local point = (Vector2.new(input.Position.X, input.Position.Y) - frame.AbsolutePosition) / scale
+			return cellAt(paletteCells, point)
+		end
+
+		-- Scaled inside an explicitly sized wrapper so AutomaticSize on parent containers matches
+		-- the visual height instead of the unscaled 233 x 240 grid.
+		children.Palette = e("Frame", {
+			LayoutOrder = 2,
+			Size = UDim2.fromOffset(math.round(PALETTE_SIZE.X * scale), math.round(PALETTE_SIZE.Y * scale)),
+			BackgroundTransparency = 1,
+		}, {
 			-- One handler shape for all three events (the props table needs a single value type).
-			return e("Frame", {
-				LayoutOrder = order,
-				Size = UDim2.fromOffset(size.X, size.Y),
+			Grid = e("Frame", {
+				Size = UDim2.fromOffset(PALETTE_SIZE.X, PALETTE_SIZE.Y),
 				BackgroundTransparency = 1,
 				[React.Event.InputBegan] = function(rbx: unknown, value: unknown)
-					local frame, input = asGui(rbx), asInput(value)
-					if frame and input and input.UserInputType == Enum.UserInputType.MouseButton1 then
-						local cell = cellAt(list, Vector2.new(input.Position.X, input.Position.Y) - frame.AbsolutePosition)
+					local input = asInput(value)
+					if input and input.UserInputType == Enum.UserInputType.MouseButton1 then
+						local cell = hitCell(rbx, value)
 						if cell then
 							commit(cell.brick.Color)
 						end
 					end
 				end,
 				[React.Event.InputChanged] = function(rbx: unknown, value: unknown)
-					local frame, input = asGui(rbx), asInput(value)
-					if frame and input and input.UserInputType == Enum.UserInputType.MouseMovement then
-						local cell = cellAt(list, Vector2.new(input.Position.X, input.Position.Y) - frame.AbsolutePosition)
-						setHoverBrick(if cell then cell.brick else nil)
+					local input = asInput(value)
+					if input and input.UserInputType == Enum.UserInputType.MouseMovement then
+						setHoverCell(hitCell(rbx, value))
 					end
 				end,
 				[React.Event.MouseLeave] = function(_: unknown, _value: unknown)
-					setHoverBrick(nil)
+					setHoverCell(nil)
 				end,
-			}, swatches)
-		end
-
-		children.Palette = cellsElement(2, cells, GRID_SIZE)
-		children.Grays = cellsElement(3, grayCells, Vector2.new(GRID_SIZE.X, HEX_H))
+			}, swatches),
+		})
 	end
 
 	return e("Frame", {
+		ref = rootRef,
 		LayoutOrder = props.LayoutOrder,
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
