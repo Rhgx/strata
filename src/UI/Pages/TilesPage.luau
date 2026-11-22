@@ -55,9 +55,12 @@ local function run(action: () -> ())
 	end)
 end
 
-local function reportAppearance(count: number, what: string)
+local function reportAppearance(count: number, hidden: number, what: string)
 	if count == 0 then
 		Status.post("warning", `The selected tiles already use {what}.`)
+	elseif hidden == count then
+		-- Saved, but paint covers every triangle, so nothing visible changed.
+		Status.post("warning", `Changed {Format.plural(count, "tile")} to {what}, but paint covers all of it. Clear paint to show it.`)
 	else
 		Status.post("success", `Changed {Format.plural(count, "tile")} to {what}.`)
 	end
@@ -106,10 +109,9 @@ local function variantRow(info: Query.SelectionInfo)
 				local variant = if id == DEFAULT_VARIANT then "" else id
 
 				run(function ()
-					reportAppearance(
-						Appearance.apply({ variant = variant }, "Strata change variant"),
-						if variant == "" then "the default look" else variant
-					)
+					local count, hidden = Appearance.apply({ variant = variant }, "Strata change variant")
+
+					reportAppearance(count, hidden, if variant == "" then "the default look" else variant)
 				end)
 			end,
 		}),
@@ -198,7 +200,19 @@ local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 
 	local bakeTip = "**Merge each tile** into 1 union.\n\n" .. "Materials and textures run smoothly across baked tiles."
 	local unbakeTip = "**Unbake tiles** into editable wedges.\n\n" .. "> Painting a baked tile unbakes it automatically."
-	local unbaked = info.count - info.baked
+	-- Tiles with every triangle deleted have nothing to bake, so they are not counted.
+	local unbaked = info.count - info.baked - info.empty
+
+	if unbaked == 0 and info.baked == 0 then
+		return Rows.button(
+			layoutOrder,
+			"Nothing to bake",
+			bake,
+			"**Every triangle of these tiles is deleted**, so there is nothing to bake.\n\n> Restore holes to bring triangles back.",
+			true,
+			Icons.BakeTiles
+		)
+	end
 
 	-- Bake is the primary call to action for an unbaked or partially baked selection.
 	if info.baked == 0 then
@@ -340,7 +354,9 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 					end
 
 					run(function ()
-						reportAppearance(Appearance.apply({ material = material }, "Strata change material"), Appearance.label(material))
+						local count, hidden = Appearance.apply({ material = material }, "Strata change material")
+
+						reportAppearance(count, hidden, Appearance.label(material))
 					end)
 				end,
 			}),
@@ -364,7 +380,9 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 
 			onCommit = function (color: Color3)
 				run(function ()
-					reportAppearance(Appearance.apply({ color = color }, "Strata change color"), "the new color")
+					local count, hidden = Appearance.apply({ color = color }, "Strata change color")
+
+					reportAppearance(count, hidden, "the new color")
 				end)
 			end,
 

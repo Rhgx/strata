@@ -89,6 +89,10 @@ local function restoreSettings()
 			s.raiseToWorld = saved.raiseToWorld
 		end
 
+		if typeof(saved.otherHeight) == "number" then
+			s.otherHeight = saved.otherHeight
+		end
+
 		-- Plugin settings serialize to JSON, so the picked axis is stored as { x, y, z }.
 		local picked = saved.pickedAxis
 
@@ -228,6 +232,7 @@ local function saveSettings()
 		mode = s.mode,
 		height = s.height,
 		raiseToWorld = s.raiseToWorld,
+		otherHeight = s.otherHeight,
 		falloff = s.falloff,
 		axis = s.axis,
 		pickedAxis = { s.pickedAxis.X, s.pickedAxis.Y, s.pickedAxis.Z },

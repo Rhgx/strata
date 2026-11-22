@@ -13,6 +13,7 @@ local CollectionService = game:GetService("CollectionService")
 local Plugin = script.Parent.Parent
 local Core = Plugin.Core
 
+local Displacement = require(Core.Displacement)
 local PartFaces = require(Core.PartFaces)
 local TerrainInstance = require(Core.TerrainInstance)
 
@@ -43,6 +44,8 @@ export type SelectionInfo = {
 	holes: number,
 	-- Selected tiles with removed points.
 	simplified: number,
+	-- Selected tiles whose every shown triangle is deleted (nothing to bake).
+	empty: number,
 }
 
 export type Appearance = {
@@ -231,12 +234,39 @@ function Query.hasHoles(model: Model): boolean
 	return digits ~= nil and string.find(digits, "-", 1, true) ~= nil
 end
 
--- Returns whether every triangle of the tile is deleted. Such a tile has nothing to bake and
--- counts as baked for place totals.
+-- Returns whether every triangle the tile shows is deleted. Such a tile has nothing to bake and
+-- counts as baked for place totals. With points removed, a shown triangle is a hole when most
+-- grid triangles under it are, which needs the opened tile; it is only read when already open
+-- (this runs on every panel render, which must not open or change tiles), otherwise the saved
+-- grid data decides.
 function Query.isAllHoles(model: Model): boolean
 	local digits = triLooksOf(model)
 
-	return digits ~= nil and #digits > 0 and string.find(digits, "[^%-]") == nil
+	if digits == nil or #digits == 0 or not string.find(digits, "-", 1, true) then
+		return false
+	end
+
+	if string.find(digits, "[^%-]") == nil then
+		return true
+	end
+
+	if not Query.isSimplified(model) then
+		return false
+	end
+
+	local opened = Session.peek(model)
+
+	if not opened then
+		return false
+	end
+
+	for t = 1, Displacement.triangleCount(opened.disp) do
+		if not Displacement.isHole(opened.disp, t) then
+			return false
+		end
+	end
+
+	return true
 end
 
 -- Reads the tile's base appearance (ignoring painted triangles) without opening it: checks the
@@ -289,8 +319,13 @@ function Query.selectionInfo(): SelectionInfo
 	local painted = 0
 	local holes = 0
 	local simplified = 0
+	local empty = 0
 
 	for index, model in models do
+		if Query.isAllHoles(model) then
+			empty += 1
+		end
+
 		if Query.isPainted(model) then
 			painted += 1
 		end
@@ -350,6 +385,7 @@ function Query.selectionInfo(): SelectionInfo
 		painted = painted,
 		holes = holes,
 		simplified = simplified,
+		empty = empty,
 	}
 end
 

@@ -145,8 +145,10 @@ end
 
 -- Applies `change` to selected tiles as one undo step named `name`. Switching the base material
 -- without specifying a variant clears the variant, since variants bind to one base material.
--- Skips tiles that already match and records nothing if zero tiles change.
-function Appearance.apply(change: Change, name: string): number
+-- Skips tiles that already match and records nothing if zero tiles change. Returns how many
+-- tiles changed, and how many of those show none of their own look (paint covers every
+-- triangle), where the change is saved but nothing visible changes.
+function Appearance.apply(change: Change, name: string): (number, number)
 	type Plan = { model: Model, look: Query.Appearance }
 
 	local plans: { Plan } = {}
@@ -168,8 +170,10 @@ function Appearance.apply(change: Change, name: string): number
 	end
 
 	if #plans == 0 then
-		return 0
+		return 0, 0
 	end
+
+	local hidden = 0
 
 	Recording.run(name, function ()
 		local written = 0
@@ -193,7 +197,22 @@ function Appearance.apply(change: Change, name: string): number
 				opened.disp.materialVariant = look.variant
 			end
 
-			for _, part in partsOf(plan.model) do
+			local parts = partsOf(plan.model)
+			-- Hidden hole wedges are updated too (a restored triangle shows the look) but do not
+			-- count as showing it.
+			local visible = 0
+
+			for _, part in parts do
+				if part.Transparency < 1 then
+					visible += 1
+				end
+			end
+
+			if visible == 0 then
+				hidden += 1
+			end
+
+			for _, part in parts do
 				part.Material = look.material
 				part.Color = look.color
 				part.MaterialVariant = look.variant
@@ -206,7 +225,7 @@ function Appearance.apply(change: Change, name: string): number
 		end
 	end)
 
-	return #plans
+	return #plans, hidden
 end
 
 -- Maps modified grid triangles to the shown triangles whose wedges need refreshing. When points
@@ -313,8 +332,9 @@ function Appearance.restoreHoles(): number
 	return #targets
 end
 
--- Copies `part`'s material, color, and material variant onto the selected tiles.
-function Appearance.copyFrom(part: BasePart): number
+-- Copies `part`'s material, color, and material variant onto the selected tiles. Returns the
+-- same as Appearance.apply.
+function Appearance.copyFrom(part: BasePart): (number, number)
 	return Appearance.apply(
 		{ material = part.Material, color = part.Color, variant = part.MaterialVariant },
 		"Strata copy appearance"

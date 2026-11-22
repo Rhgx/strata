@@ -190,7 +190,8 @@ function Shape.round(): number
 			local vertices = changed[opened]
 
 			if vertices then
-				Session.updateWedges(opened, vertices)
+				-- Rounded points must stay where Round puts them, so removed ones come back.
+				Session.updateMoved(opened, vertices)
 				table.insert(changedTiles, opened)
 				count += 1
 			end

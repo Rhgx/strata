@@ -303,10 +303,17 @@ function Paint.effectiveRadius(opened: Opened, brush: Brush): number
 end
 
 -- Applies one brush tick along world-space path `centers` to `targets` over frame time `dt`,
--- returning modified vertex indices per tile.
-function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt: number): { [Opened]: { [number]: true } }
+-- returning modified vertex indices per tile, and whether the brush reached only points that
+-- were removed (the Mesh tool). Removed points are skipped: they follow the shown surface and
+-- would snap straight back, so a stroke over only removed points changes nothing.
+function Paint.apply(
+	targets: { Opened },
+	centers: { Vector3 },
+	brush: Brush,
+	dt: number
+): ({ [Opened]: { [number]: true } }, boolean)
 	if #centers == 0 then
-		return {}
+		return {}, false
 	end
 
 	-- Single gather covering the entire frame path and widest effective radius.
@@ -336,6 +343,8 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 	-- Compute all vertex moves before writing so smoothing evaluates only the pre-tick surface.
 	local moves: { Move } = {}
 
+	local reachedRemoved, reachedKept = false, false
+
 	for _, item in items do
 		local disp = item.opened.disp
 		local radius = Paint.effectiveRadius(item.opened, brush)
@@ -363,6 +372,13 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 			if nearest2 >= r2 then
 				continue
 			end
+
+			if disp.removed[index] then
+				reachedRemoved = true
+				continue
+			end
+
+			reachedKept = true
 
 			local axis = localAxis(item, brush, index)
 			local current = Displacement.fieldVector(disp, index)
@@ -430,7 +446,7 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 		set[move.index] = true
 	end
 
-	return changed
+	return changed, reachedRemoved and not reachedKept
 end
 
 -- Samples the Raise To height of `point` (world space) on `opened`: studs along the brush axis

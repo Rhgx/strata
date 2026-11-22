@@ -14,6 +14,7 @@ local Plugin = Viewport.Parent
 local State = Plugin.State
 local Scene = Plugin.Scene
 
+local Format = require(State.Format)
 local Status = require(State.Status)
 local Settings = require(State.Settings)
 
@@ -113,15 +114,16 @@ return function (plugin: Plugin): () -> ()
 				return
 			end
 
-			local ok, result = pcall(Appearance.copyFrom, part)
+			local ok, result, hidden = pcall(Appearance.copyFrom, part)
 
 			if not ok then
 				Status.post("error", `Copy failed: {result}`)
 			elseif result == 0 then
 				Status.post("warning", `The selected tiles already look like {part.Name}.`)
+			elseif hidden == result then
+				Status.post("warning", `Copied {describe(part)} to {Format.plural(result, "tile")}, but paint covers all of it. Clear paint to show it.`)
 			else
-				local plural = if result == 1 then "1 tile" else `{result} tiles`
-				Status.post("success", `Copied {describe(part)} from {part.Name} to {plural}.`)
+				Status.post("success", `Copied {describe(part)} from {part.Name} to {Format.plural(result, "tile")}.`)
 			end
 
 			stop()

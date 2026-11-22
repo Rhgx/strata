@@ -80,6 +80,8 @@ local DOT_MARGIN = 6
 local MAX_DOTS = 300
 -- Pointer travel threshold in pixels separating a single-point click from a drag stroke.
 local DRAG_PIXELS = 4
+-- A Simplify drag always reaches this share of a grid step (see markReach).
+local MIN_MARK_STEPS = 0.75
 local SEPARATOR = KeyStrip.SEPARATOR
 
 local function edgeKey(a: number, b: number, count: number): number
@@ -293,6 +295,16 @@ return function (plugin: Plugin): () -> ()
 		end
 	end
 
+	-- How far a Simplify drag reaches: the Radius, but at least most of a grid step, so a drag
+	-- with a small radius still marks the nearest point instead of nothing (like the sculpt
+	-- brushes, which always reach one grid step).
+	local function markReach(opened: Opened, radius: number): number
+		local c = opened.disp.corners
+		local spacing = math.max((c[4] - c[1]).Magnitude, (c[2] - c[1]).Magnitude) / (opened.disp.size - 1)
+
+		return math.max(radius, spacing * MIN_MARK_STEPS)
+	end
+
 	-- Draws vertex dots near the cursor colored by state (white kept, orange remove-marked, red
 	-- removed, green restore-marked), enlarging vertices that a drag would affect.
 	local function drawPoints(models: { Model }, hit: TileHit.Hit, radius: number, restoring: boolean)
@@ -333,7 +345,7 @@ return function (plugin: Plugin): () -> ()
 
 	-- Simplify drag: marks vertices inside the brush (or clears opposing marks).
 	local function markAt(models: { Model }, hit: TileHit.Hit, restoring: boolean)
-		local radius = Settings.get().radius
+		local radius = markReach(hit.opened, Settings.get().radius)
 		local samples, travel = TriangleBrush.samples(lastCenter, hit.position, radius)
 		lastCenter = hit.position
 
@@ -725,9 +737,11 @@ return function (plugin: Plugin): () -> ()
 			if previewing and not holes then
 				local normal = hit.normal
 				local up = if math.abs(normal.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+				-- The ring shows how far a drag reaches, which is at least most of a grid step.
+				local reach = markReach(hit.opened, settings.radius)
 				ring.CFrame = CFrame.lookAt(hit.position + normal * 0.05, hit.position + normal * 2, up)
-				ring.Radius = settings.radius
-				ring.InnerRadius = settings.radius - math.max(0.15, settings.radius * 0.04)
+				ring.Radius = reach
+				ring.InnerRadius = reach - math.max(0.15, reach * 0.04)
 				ring.Color3 = if restoring then RESTORE_COLOR else MARK_COLOR
 				ring.Visible = true
 			else
@@ -765,7 +779,7 @@ return function (plugin: Plugin): () -> ()
 				TriangleOutline.draw(outline, covered, if restoring then RESTORE_COLOR else REMOVE_COLOR)
 			else
 				outline.clear()
-				drawPoints(models, hit, settings.radius, restoring)
+				drawPoints(models, hit, markReach(hit.opened, settings.radius), restoring)
 			end
 		end)
 	)

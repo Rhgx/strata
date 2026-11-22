@@ -63,13 +63,21 @@ end
 
 -- Applies stitch target positions, propagates them to matching neighbor seam vertices so seams
 -- stay closed, and updates wedges. Returns the vertex changes and modified tiles for saving.
-local function applyMoves(moves: Stitch.Moves): (Stitch.Changes, { Opened })
+-- `keepRemoved` is for closing seams, whose moves are removed points by design; every other
+-- caller moves points onto parts, where a removed point must come back to stay put.
+local function applyMoves(moves: Stitch.Moves, keepRemoved: boolean?): (Stitch.Changes, { Opened })
 	local all = Stitch.propagate(moves, Session.getAll(Session.models()))
 	local changes = Stitch.write(all)
 	local changed: { Opened } = {}
 
 	for opened, vertices in changes do
-		Session.updateWedges(opened, vertices)
+		if keepRemoved then
+			Session.updateWedges(opened, vertices)
+		else
+			-- Points stitched onto a part must stay where they land, so removed ones come back.
+			Session.updateMoved(opened, vertices)
+		end
+
 		table.insert(changed, opened)
 	end
 
@@ -81,6 +89,11 @@ local function applyStitch(result: Stitch.Result): StitchReport
 	local changes, changed = applyMoves(result.moves)
 
 	for _, opened in changed do
+		TerrainInstance.save(opened)
+	end
+
+	-- A stitched tile's edge can now differ from a simplified neighbor's straight edge.
+	for _, opened in Edges.closeRemovedSeams(changed) do
 		TerrainInstance.save(opened)
 	end
 
@@ -133,7 +146,10 @@ function Edges.restorePins(pins: Stitch.Moves): { Opened }
 		return {}
 	end
 
-	local _, changed = applyMoves(pins)
+	-- Pins hold kept edge points on their parts after an edit. A removed point among them only
+	-- follows the straight edge between kept ones, so it is not restored (that would undo
+	-- simplification on every edit near a part).
+	local _, changed = applyMoves(pins, true)
 
 	return changed
 end
@@ -245,7 +261,7 @@ function Edges.closeRemovedSeams(tiles: { Opened }): { Opened }
 		return {}
 	end
 
-	local _, changed = applyMoves(moves)
+	local _, changed = applyMoves(moves, true)
 
 	return changed
 end
@@ -318,6 +334,12 @@ function Edges.sewSelected(): (number, string?)
 			end
 
 			for opened in stitched do
+				changed[opened] = true
+			end
+
+			-- Stitching may restore and move edge points next to a simplified neighbor.
+			for _, opened in Edges.closeRemovedSeams(stitchedList) do
+				TerrainInstance.save(opened)
 				changed[opened] = true
 			end
 		end

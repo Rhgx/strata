@@ -180,8 +180,83 @@ local function mirrorAcrossSeams(marked: { [Opened]: { [number]: MeshStage.Mark 
 	end
 end
 
--- Commits all staged marks in one undo step and clears the stage. Returns (changedTiles, changedPoints)
--- counted on the user-marked tiles (excluding mirrored neighbor adjustments).
+--[[
+	Applies point marks (remove or restore) and keeps seams consistent: marks on edge points are
+	mirrored onto neighboring tiles, then removed seam points of every changed tile are removed
+	on its neighbors too (repairing seams mismatched before). Rebuilds, saves and closes seams.
+	Returns how many of the given tiles changed and how many of their points did (mirrored
+	neighbors are not counted). Call inside a recording.
+]]
+local function applyPointMarks(marked: { [Opened]: { [number]: MeshStage.Mark } }): (number, number)
+	local tiles, points = 0, 0
+	local userTiles: { [Opened]: true } = {}
+
+	for opened in marked do
+		userTiles[opened] = true
+	end
+
+	local twinsOf = Edges.seamTwins(Session.getAll(Session.models()))
+	mirrorAcrossSeams(marked, twinsOf)
+
+	local changedSet: { [Opened]: true } = {}
+
+	for opened, marks in marked do
+		for v, mark: MeshStage.Mark in marks do
+			if Displacement.setRemoved(opened.disp, v, mark == "remove") then
+				changedSet[opened] = true
+
+				if userTiles[opened] then
+					points += 1
+				end
+			end
+		end
+	end
+
+	-- Propagate existing removed seam points on changed tiles to their neighbors as well,
+	-- repairing any seams that were mismatched prior to this edit.
+	local repairs: { [Opened]: { [number]: MeshStage.Mark } } = {}
+
+	for opened in changedSet do
+		local disp = opened.disp
+		local list: { [number]: MeshStage.Mark } = {}
+
+		for v in disp.removed do
+			if isEdgePoint(disp, v) then
+				list[v] = "remove"
+			end
+		end
+
+		repairs[opened] = list
+	end
+
+	mirrorAcrossSeams(repairs, twinsOf)
+
+	for opened, marks in repairs do
+		for v, mark: MeshStage.Mark in marks do
+			if Displacement.setRemoved(opened.disp, v, mark == "remove") then
+				changedSet[opened] = true
+			end
+		end
+	end
+
+	local changed: { Opened } = {}
+
+	for opened in changedSet do
+		Session.updateTopology(opened)
+		table.insert(changed, opened)
+
+		if userTiles[opened] then
+			tiles += 1
+		end
+	end
+
+	MeshActions.finish(changed)
+
+	return tiles, points
+end
+
+-- Commits every marked point as one undo step and clears the marks. Returns how many tiles and
+-- points changed (points counted on the marked tiles, not their mirrored neighbors).
 function MeshActions.applyMarks(): (number, number)
 	if MeshStage.isEmpty() then
 		return 0, 0
@@ -200,68 +275,7 @@ function MeshActions.applyMarks(): (number, number)
 			end
 		end
 
-		local userTiles: { [Opened]: true } = {}
-
-		for opened in marked do
-			userTiles[opened] = true
-		end
-
-		local twinsOf = Edges.seamTwins(Session.getAll(Session.models()))
-		mirrorAcrossSeams(marked, twinsOf)
-
-		local changedSet: { [Opened]: true } = {}
-
-		for opened, marks in marked do
-			for v, mark: MeshStage.Mark in marks do
-				if Displacement.setRemoved(opened.disp, v, mark == "remove") then
-					changedSet[opened] = true
-
-					if userTiles[opened] then
-						points += 1
-					end
-				end
-			end
-		end
-
-		-- Propagate existing removed seam points on changed tiles to their neighbors as well,
-		-- repairing any seams that were mismatched prior to this edit.
-		local repairs: { [Opened]: { [number]: MeshStage.Mark } } = {}
-
-		for opened in changedSet do
-			local disp = opened.disp
-			local list: { [number]: MeshStage.Mark } = {}
-
-			for v in disp.removed do
-				if isEdgePoint(disp, v) then
-					list[v] = "remove"
-				end
-			end
-
-			repairs[opened] = list
-		end
-
-		mirrorAcrossSeams(repairs, twinsOf)
-
-		for opened, marks in repairs do
-			for v, mark: MeshStage.Mark in marks do
-				if Displacement.setRemoved(opened.disp, v, mark == "remove") then
-					changedSet[opened] = true
-				end
-			end
-		end
-
-		local changed: { Opened } = {}
-
-		for opened in changedSet do
-			Session.updateTopology(opened)
-			table.insert(changed, opened)
-
-			if userTiles[opened] then
-				tiles += 1
-			end
-		end
-
-		MeshActions.finish(changed)
+		tiles, points = applyPointMarks(marked)
 		Recording.autoBake()
 	end)
 
@@ -269,35 +283,40 @@ function MeshActions.applyMarks(): (number, number)
 	return tiles, points
 end
 
--- Restores every removed point on selected tiles immediately as one undo step. Returns the
--- number of modified tiles.
+-- Restores every removed point on selected tiles immediately as one undo step, mirrored across
+-- seams like Apply, so a restored edge never meets a neighbor's straight simplified edge.
+-- Returns the number of modified tiles.
 function MeshActions.restorePoints(): number
-	local targets: { Opened } = {}
+	local marked: { [Opened]: { [number]: MeshStage.Mark } } = {}
+	local count = 0
 
 	for _, opened in Query.selectedTiles() do
 		if next(opened.disp.removed) ~= nil then
-			table.insert(targets, opened)
+			local marks: { [number]: MeshStage.Mark } = {}
+
+			for v in opened.disp.removed do
+				marks[v] = "restore"
+			end
+
+			marked[opened] = marks
+			count += 1
 		end
 	end
 
-	if #targets == 0 then
+	if count == 0 then
 		return 0
 	end
 
 	Recording.run("Strata restore points", function ()
-		for _, opened in targets do
-			-- Reproject first so restored points land on the currently displayed surface.
+		-- Reproject first so restored points land on the currently displayed surface.
+		for opened in marked do
 			Displacement.reproject(opened.disp)
-			table.clear(opened.disp.removed)
-			opened.disp.meshCache = nil
-			Session.updateTopology(opened)
-			TerrainInstance.save(opened)
 		end
 
+		applyPointMarks(marked)
 		Recording.autoBake()
 	end)
 
-	return #targets
+	return count
 end
-
 return MeshActions

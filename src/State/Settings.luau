@@ -75,6 +75,9 @@ export type State = {
 	height: number,
 	-- Raise To: interpret `height` as a world coordinate along the axis instead of an offset from each tile's base.
 	raiseToWorld: boolean,
+	-- Raise To: the Height of the other From mode, swapped in when From changes, so a world height
+	-- (often far from 0) never carries over to Tile base and the reverse.
+	otherHeight: number,
 	falloff: Falloff,
 	axis: Axis,
 	-- World-space unit axis for "Picked" mode, set with Alt + Right Click.
@@ -221,6 +224,7 @@ local state: State = table.freeze({
 	strength = 6,
 	height = 0,
 	raiseToWorld = false,
+	otherHeight = 0,
 	falloff = "Soft" :: Falloff,
 	axis = "Face" :: Axis,
 	pickedAxis = Vector3.yAxis,
@@ -284,6 +288,7 @@ function Settings.update(change: (State) -> ())
 	nextState.tileSize = math.clamp(nextState.tileSize, Settings.TILE_SIZE_MIN, Settings.TILE_SIZE_MAX)
 	nextState.smoothingAngle = math.clamp(nextState.smoothingAngle, Settings.SMOOTHING_MIN, Settings.SMOOTHING_MAX)
 	nextState.height = math.clamp(nextState.height, Settings.HEIGHT_MIN, Settings.HEIGHT_MAX)
+	nextState.otherHeight = math.clamp(nextState.otherHeight, Settings.HEIGHT_MIN, Settings.HEIGHT_MAX)
 	nextState.noiseMin = math.clamp(nextState.noiseMin, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.noiseMax = math.clamp(nextState.noiseMax, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.stitchReach = math.clamp(nextState.stitchReach, Settings.STITCH_REACH_MIN, Settings.STITCH_REACH_MAX)

@@ -57,7 +57,7 @@ Live place state and read-only scene queries.
 
 | Module | Responsibility |
 | --- | --- |
-| `src/Scene/Session.luau` | Caches opened `TerrainInstance.Opened` handles per `Model`, tracks `dirty` tiles edited since their last bake, provides `updateWedges`, `bake`, and `bakeDirty`, and clears the in-memory cache on `ChangeHistoryService.OnUndo`, `OnRedo`, and `StrataDisplacement` tag removal. |
+| `src/Scene/Session.luau` | Caches opened `TerrainInstance.Opened` handles per `Model`, tracks `dirty` tiles edited since their last bake, provides `updateWedges`, `bake`, and `bakeDirty`, and clears the in-memory cache on `ChangeHistoryService.OnUndo`, `OnRedo`, and `StrataDisplacement` tag removal. `updateMoved` restores removed points an exact edit moves (Stitch, Round) before rebuilding. |
 | `src/Scene/Query.luau` | Read-only selection and spatial queries: `workingModels` (the tiles a viewport tool works on: the selection with Selected only on, otherwise all), `displacementOf`, `selectedModels`, `selectedTiles`, `selectedParts`, `touchingParts`, `tilesNear`, `appearanceOf`, `selectionInfo`, and `placeInfo`. Resolves selections whether the user clicks a `TerrainArea` container, a tile model, or a child wedge/union. |
 | `src/Scene/MeshStage.luau` | Points marked in the Mesh tool's `Simplify` mode but not applied yet (by model), with a cached preview triangulation per tile and the triangle counts before and after; cleared on undo, redo, mode changes and when the tool stops. |
 

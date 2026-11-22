@@ -97,6 +97,16 @@ local MODE_COLORS: { [Paint.Effect]: Color3 } = {
 	RaiseTo = Color3.fromRGB(230, 190, 70),
 }
 
+-- The brush size label. The brush always reaches one grid step (Paint.effectiveRadius), so a
+-- smaller Radius says how far it really reaches instead of leaving a larger ring unexplained.
+local function sizeText(radius: number, effective: number): string
+	if effective > radius + 1e-3 then
+		return `Radius {Format.studs(radius)} st (reaches {Format.studs(effective)} at this Detail)`
+	end
+
+	return `Radius {Format.studs(radius)} st`
+end
+
 local function keyHints(mode: Paint.Effect, settings: Settings.State, effective: number): string
 	local parts: { string }
 
@@ -177,6 +187,8 @@ return function (plugin: Plugin): () -> ()
 	local missFrames = 0
 	local displayNormal: Vector3? = nil
 	local resize: Input.DragResize? = nil
+	-- Whether the current stroke reached points removed by the Mesh tool (see endStroke).
+	local strokeReachedRemoved = false
 	local wasPainting = false
 
 	-- Depth-tested primary ring plus a faint always-on-top ghost ring so the cursor stays
@@ -338,7 +350,11 @@ return function (plugin: Plugin): () -> ()
 
 		lastCenter = center
 
-		local changed = Paint.apply(targets, centers, brush, dt)
+		local changed, reachedRemoved = Paint.apply(targets, centers, brush, dt)
+
+		if reachedRemoved then
+			strokeReachedRemoved = true
+		end
 
 		if next(changed) == nil then
 			return
@@ -398,8 +414,8 @@ return function (plugin: Plugin): () -> ()
 	-- Alt + Right Click: samples the clicked face's normal as the Picked axis (using the base
 	-- face normal on displacements, matching Hammer). Clicking sky resets to Up (Y).
 	local function pickAxis()
-		local ray = mouse.UnitRay
-		local hit = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH)
+		-- Invisible parts (triggers, hitboxes) are looked through, like the other pick tools.
+		local hit = VisibleHit.cast(mouse.UnitRay)
 		local axis = Vector3.yAxis
 
 		if hit then
@@ -542,9 +558,18 @@ return function (plugin: Plugin): () -> ()
 		table.clear(snapshotList)
 		lastCenter = nil
 
+		local reachedRemoved = strokeReachedRemoved
+		strokeReachedRemoved = false
+
 		if #edited == 0 then
 			-- Cancel untouched clicks so no empty undo entry is created.
 			ChangeHistoryService:FinishRecording(current, Enum.FinishRecordingOperation.Cancel)
+
+			-- Say why nothing moved instead of failing silently.
+			if reachedRemoved then
+				Status.post("warning", "No points to move here: this area was simplified. Restore points with the Mesh tool (Ctrl) to sculpt it.")
+			end
+
 			return
 		end
 
@@ -658,7 +683,7 @@ return function (plugin: Plugin): () -> ()
 				if held then
 					local current = Settings.get()
 					placeCursor(held.position, displayNormal or held.normal, current, mode, effectiveAt(held, mode, current))
-					RadiusPreview.label(held.position, `Radius {Format.studs(current.radius)} st`)
+					RadiusPreview.label(held.position, sizeText(current.radius, effectiveAt(held, mode, current)))
 				end
 
 				return
@@ -674,8 +699,9 @@ return function (plugin: Plugin): () -> ()
 				local text = `Radius {Format.studs(settings.radius)} st`
 
 				if previewHit then
-					placeCursor(previewHit.position, previewHit.normal, settings, mode, effectiveAt(previewHit, mode, settings))
-					RadiusPreview.label(previewHit.position, text)
+					local effective = effectiveAt(previewHit, mode, settings)
+					placeCursor(previewHit.position, previewHit.normal, settings, mode, effective)
+					RadiusPreview.label(previewHit.position, sizeText(settings.radius, effective))
 				else
 					local position, facing = RadiusPreview.fallback(settings.radius)
 

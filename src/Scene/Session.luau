@@ -150,6 +150,34 @@ function Session.updateWedges(opened: Opened, changed: { [number]: true }): bool
 	return rebuilt
 end
 
+--[[
+	Like updateWedges, for edits that move points to exact places (Stitch onto a part edge, Round
+	folds): a removed point among `changed` is restored first, since a removed point follows the
+	shown surface and would snap straight back, leaving the edit undone while it reported success.
+	Corners are never removed, so they need nothing. Returns whether any point was restored.
+]]
+function Session.updateMoved(opened: Opened, changed: { [number]: true }): boolean
+	local disp = opened.disp
+	local restored = false
+
+	for v in changed do
+		if disp.removed[v] and Displacement.setRemoved(disp, v, false) then
+			restored = true
+		end
+	end
+
+	if not restored then
+		Session.updateWedges(opened, changed)
+
+		return false
+	end
+
+	Displacement.reproject(disp)
+	Session.updateTopology(opened)
+
+	return true
+end
+
 -- Rebuilds all wedges after vertices are removed or restored and the triangulation changes,
 -- restoring wedges first if the displacement was baked.
 function Session.updateTopology(opened: Opened)

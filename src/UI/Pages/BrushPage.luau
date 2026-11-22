@@ -145,7 +145,14 @@ local function BrushPage(props: { settings: Settings.State })
 				OnItemSelected = function (id: string?)
 					if id == "World" or id == "Tile" then
 						Settings.update(function (s)
-							s.raiseToWorld = id == "World"
+							local toWorld = id == "World"
+
+							-- Each mode keeps its own Height: swap in the other one.
+							if toWorld ~= s.raiseToWorld then
+								s.height, s.otherHeight = s.otherHeight, s.height
+							end
+
+							s.raiseToWorld = toWorld
 
 							-- World heights require a world axis; default to Up if currently per-tile.
 							if id == "World" and (s.axis == "Face" or s.axis == "Subdiv") then
