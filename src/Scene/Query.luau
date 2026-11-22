@@ -193,6 +193,13 @@ function Query.hasHoles(model: Model): boolean
 	return digits ~= nil and string.find(digits, "-", 1, true) ~= nil
 end
 
+-- Whether every triangle of the tile is deleted (from its saved data): nothing to bake, so it
+-- counts as baked.
+function Query.isAllHoles(model: Model): boolean
+	local digits = triLooksOf(model)
+	return digits ~= nil and #digits > 0 and string.find(digits, "[^%-]") == nil
+end
+
 -- The tile's own look (painted triangles aside) as it shows right now: read from its baked
 -- union, or a wedge on an unpainted tile (so edits made with Studio's own tools count), falling
 -- back to its saved data. Never opens the tile.
@@ -288,12 +295,14 @@ function Query.selectionInfo(): SelectionInfo
 	}
 end
 
--- Every displacement in the place and how many are baked.
+-- Every displacement in the place and how many are baked (a tile whose every triangle is
+-- deleted counts as baked: there is nothing to bake). The selection's counts stay exact, so the
+-- tile page's Bake and Unbake match what they do.
 function Query.placeInfo(): PlaceInfo
 	local models = Session.models()
 	local baked = 0
 	for _, model in models do
-		if TerrainInstance.isBaked(model) then
+		if TerrainInstance.isBaked(model) or Query.isAllHoles(model) then
 			baked += 1
 		end
 	end

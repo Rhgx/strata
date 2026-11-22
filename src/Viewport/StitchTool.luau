@@ -295,7 +295,7 @@ return function(plugin: Plugin): () -> ()
 
 	table.insert(
 		connections,
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			if not Settings.get().stitching or UserInputService:GetFocusedTextBox() then
 				return
 			end

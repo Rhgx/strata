@@ -130,6 +130,10 @@ local function BrushPage(props: { settings: Settings.State })
 					if id == "World" or id == "Tile" then
 						Settings.update(function(s)
 							s.raiseToWorld = id == "World"
+							-- A world height is measured along a world axis: Up unless one was set.
+							if id == "World" and (s.axis == "Face" or s.axis == "Subdiv") then
+								s.axis = "Up"
+							end
 						end)
 					end
 				end,

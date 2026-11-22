@@ -20,6 +20,7 @@ local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Create = require(script.Parent.Parent.Actions.Create)
 local KeyStrip = require(script.Parent.KeyStrip)
+local Input = require(script.Parent.Input)
 
 export type Pick = {
 	part: BasePart,
@@ -207,7 +208,7 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 	-- Enter creates terrain from the picks, like the panel's Create button.
 	table.insert(
 		connections,
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			if not Settings.get().picking or UserInputService:GetFocusedTextBox() then
 				return
 			end

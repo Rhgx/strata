@@ -15,6 +15,7 @@ local UserInputService = game:GetService("UserInputService")
 local Settings = require(script.Parent.Parent.State.Settings)
 local MeshStage = require(script.Parent.Parent.Scene.MeshStage)
 local PickFaceTool = require(script.Parent.PickFaceTool)
+local Input = require(script.Parent.Input)
 
 local ICONS = {
 	paint = "rbxasset://SystemCursors/Cross",
@@ -58,7 +59,11 @@ return function(plugin: Plugin): () -> ()
 			plugin:Deactivate()
 			releasing = false
 		end
-		mouse.Icon = if state.painting or state.coloring or state.meshing then ICONS.paint elseif state.picking or state.stitching or state.sampling then ICONS.pick else ""
+		mouse.Icon = if state.coloring and state.pickingLook
+			then ICONS.pick
+			elseif state.painting or state.coloring or state.meshing then ICONS.paint
+			elseif state.picking or state.stitching or state.sampling then ICONS.pick
+			else ""
 	end
 
 	local unsubscribe = Settings.subscribe(sync)
@@ -86,12 +91,17 @@ return function(plugin: Plugin): () -> ()
 				end
 			end)
 		end),
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			if input.KeyCode ~= Enum.KeyCode.Escape or UserInputService:GetFocusedTextBox() then
 				return
 			end
 			if Settings.get().overlay ~= "none" then
 				Settings.setOverlay("none")
+			elseif Settings.get().coloring and Settings.get().pickingLook then
+				-- First Esc cancels the Material tool's pipette; the next one stops the tool.
+				Settings.update(function(s)
+					s.pickingLook = false
+				end)
 			elseif Settings.get().meshing and not MeshStage.isEmpty() then
 				-- First Esc drops the Mesh tool's marked points; the next one stops the tool.
 				MeshStage.clear()

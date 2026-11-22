@@ -443,7 +443,12 @@ return function(plugin: Plugin): () -> ()
 		if recording then
 			endStroke()
 		end
-		if not settings.meshing or Session.isBaking() then
+		if not settings.meshing then
+			return
+		end
+		if Session.isBaking() then
+			-- Say so instead of ignoring the click.
+			Status.post("warning", "Still baking the last edits. Try again in a moment.")
 			return
 		end
 		-- Alt + drag resizes instead (it would otherwise orbit the camera).
@@ -534,7 +539,7 @@ return function(plugin: Plugin): () -> ()
 	end
 	table.insert(
 		connections,
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			local settings = Settings.get()
 			if not settings.meshing or UserInputService:GetFocusedTextBox() then
 				return
@@ -552,9 +557,19 @@ return function(plugin: Plugin): () -> ()
 			end
 		end)
 	)
-	-- Undo and redo change tiles behind the marks' back.
-	table.insert(connections, ChangeHistoryService.OnUndo:Connect(MeshStage.clear))
-	table.insert(connections, ChangeHistoryService.OnRedo:Connect(MeshStage.clear))
+	-- Undo and redo change tiles behind the marks' back, and the wireframe must redraw.
+	local function onHistory()
+		version += 1
+		MeshStage.clear()
+	end
+	table.insert(connections, ChangeHistoryService.OnUndo:Connect(onHistory))
+	table.insert(connections, ChangeHistoryService.OnRedo:Connect(onHistory))
+	-- Marks applied from the panel's Apply button change points too; clearing them is the cue.
+	local unsubscribeStage = MeshStage.subscribe(function()
+		if MeshStage.isEmpty() then
+			version += 1
+		end
+	end)
 
 	table.insert(
 		connections,
@@ -665,6 +680,7 @@ return function(plugin: Plugin): () -> ()
 
 	return function()
 		unsubscribe()
+		unsubscribeStage()
 		endStroke()
 		for _, connection in connections do
 			connection:Disconnect()

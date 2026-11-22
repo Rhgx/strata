@@ -70,7 +70,7 @@ Pages are composed from layout helpers in `src/UI/Rows.luau` (`LABEL_WIDTH = 66`
 
 ## Color editing (`src/UI/ColorField.luau`, `src/UI/ColorPicker.luau`)
 
-`ColorField` packs a `22x22` swatch button, a text input, and an optional pipette button (`SampleTool`) onto one property row. Below it, the Material page shows `Recent`: up to 6 looks painted or picked lately (`Settings.recentLooks`, newest first, saved between sessions), one click each, with the look being painted outlined. The text input accepts `#RRGGBB`, `RRGGBB`, `#RGB`, or `"R, G, B"` (the format copied from Studio's Properties window).
+`ColorField` packs a `22x22` swatch button, a text input, and an optional pipette button (`SampleTool`) onto one property row. The Material page starts with a `Paint` / `Erase` switch (`Settings.paintErase`, saved; `Ctrl` swaps them while held). Below the color, it shows `Recent`: up to 6 looks painted or picked lately (`Settings.recentLooks`, newest first, saved between sessions), one click each, with the look being painted outlined. The text input accepts `#RRGGBB`, `RRGGBB`, `#RGB`, or `"R, G, B"` (the format copied from Studio's Properties window).
 
 Clicking the swatch opens `ColorPicker` inline below the row, laid out like Studio's Properties color picker with four modes (`RGB`, `HSV`, `Hex`, and `Brick`):
 

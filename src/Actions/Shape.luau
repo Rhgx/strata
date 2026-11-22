@@ -143,15 +143,28 @@ function Shape.round(): number
 	end
 	local count = 0
 	Recording.run("Strata round", function()
+		local settings = Settings.get()
+		local pins = if settings.stitchParts then Edges.pinsFor(targets) else {}
 		local changed = Subdivide.apply(targets)
+		local changedTiles: { Opened } = {}
 		for _, opened in targets do
 			local vertices = changed[opened]
 			if vertices then
 				Session.updateWedges(opened, vertices)
+				table.insert(changedTiles, opened)
 				count += 1
 			end
 			-- Every target gets the subdiv flag, so save them all.
 			TerrainInstance.save(opened)
+		end
+		-- Rounding moves seam points the selection shares with unselected neighbors and parts;
+		-- sew and re-stitch them like other edits do.
+		if settings.autosew then
+			Edges.autosew(changedTiles, pins)
+		else
+			for _, opened in Edges.restorePins(pins) do
+				TerrainInstance.save(opened)
+			end
 		end
 		Recording.autoBake()
 	end)

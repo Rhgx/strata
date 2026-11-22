@@ -49,7 +49,7 @@ local PAINT_KEYS: { KeyHint } = {
 
 local MATERIAL_KEYS: { KeyHint } = {
 	{ key = "Left Drag", action = "Paint material" },
-	{ key = "Ctrl", action = "Erase" },
+	{ key = "Ctrl", action = "Erase (or paint)" },
 	{ key = "Alt + Right Click", action = "Pick look" },
 }
 

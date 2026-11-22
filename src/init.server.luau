@@ -114,6 +114,9 @@ local function restoreSettings()
 		if typeof(saved.paintFine) == "boolean" then
 			s.paintFine = saved.paintFine
 		end
+		if typeof(saved.paintErase) == "boolean" then
+			s.paintErase = saved.paintErase
+		end
 		-- Stored as { m = material name, c = hex color, v = variant }; bad entries are skipped.
 		if typeof(saved.recentLooks) == "table" then
 			local looks: { Settings.RecentLook } = {}
@@ -191,6 +194,7 @@ local function saveSettings()
 		paintColor = s.paintColor:ToHex(),
 		paintVariant = s.paintVariant,
 		paintFine = s.paintFine,
+		paintErase = s.paintErase,
 		recentLooks = recentLooksToSave(s.recentLooks),
 		ribbonTools = s.ribbonTools,
 		simplifyAngle = s.simplifyAngle,

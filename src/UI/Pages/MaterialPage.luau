@@ -12,6 +12,7 @@ local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
 local ColorField = require(script.Parent.Parent.ColorField)
 local Dropdown = require(script.Parent.Parent.Dropdown)
 
+local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 local Tooltip = require(script.Parent.Parent.Tooltip)
 
@@ -81,6 +82,8 @@ local function RecentSwatch(props: { look: Settings.RecentLook, current: boolean
 				s.paintMaterial = look.material
 				s.paintColor = look.color
 				s.paintVariant = look.variant
+				-- Choosing a look means painting with it next.
+				s.paintErase = false
 			end)
 		end,
 	}, {
@@ -114,6 +117,43 @@ local function recentRow(layoutOrder: number, settings: Settings.State)
 	return Rows.property(layoutOrder, "Recent", e("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, swatches))
 end
 
+-- Paint or Erase, as two buttons so the mode is always visible (like the Mesh tool's modes).
+local function modeRow(layoutOrder: number, settings: Settings.State)
+	local function button(order: number, text: string, icon: Icons.Icon, erase: boolean, tooltip: string)
+		return Rows.withTooltip(
+			tooltip,
+			e(StudioComponents.Button, {
+				Size = UDim2.fromScale(1, 1),
+				Text = text,
+				Icon = icon,
+				Selected = settings.paintErase == erase,
+				OnActivated = function()
+					Settings.update(function(s)
+						s.paintErase = erase
+					end)
+				end,
+			}),
+			order
+		)
+	end
+	return Rows.grid(layoutOrder, 2, {
+		Paint = button(
+			1,
+			"Paint",
+			Icons.PaintMode,
+			false,
+			"**Paint the look below** into tiles.\n\n> Hold `Ctrl` to erase instead."
+		),
+		Erase = button(
+			2,
+			"Erase",
+			Icons.EraseMode,
+			true,
+			"**Erase painted looks** back to each tile's own look. Holes stay.\n\n> Hold `Ctrl` to paint instead."
+		),
+	})
+end
+
 local function MaterialPage(props: { settings: Settings.State })
 	local settings = props.settings
 
@@ -124,6 +164,7 @@ local function MaterialPage(props: { settings: Settings.State })
 			Settings.stopViewportTool,
 			"**Stop the Material tool** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
 		),
+		Mode = modeRow(2, settings),
 		Material = Rows.property(
 			5,
 			"Material",
@@ -138,6 +179,7 @@ local function MaterialPage(props: { settings: Settings.State })
 							s.paintMaterial = material
 							-- A variant belongs to one base material.
 							s.paintVariant = ""
+							s.paintErase = false
 						end)
 					end
 				end,
@@ -160,6 +202,7 @@ local function MaterialPage(props: { settings: Settings.State })
 			onCommit = function(color: Color3)
 				Settings.update(function(s)
 					s.paintColor = color
+					s.paintErase = false
 				end)
 			end,
 			sampling = settings.pickingLook,

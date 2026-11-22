@@ -24,6 +24,8 @@
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
+local KeyCapture = require(script.Parent.Parent.State.KeyCapture)
+
 local Input = {}
 
 -- How long the camera is held after a Ctrl + Scroll.
@@ -134,7 +136,8 @@ end
 
 --[[
 	Calls `onStep(1)` or `onStep(-1)` on Ctrl + Scroll over the 3D view while `active()` says so,
-	and holds the camera still for it. Returns the connections.
+	and holds the camera still for it. Returns the connections. Scrolling down (toward you) grows
+	and scrolling up shrinks, which reads as pulling the brush out and pushing it in.
 ]]
 function Input.connectResize(mouse: PluginMouse, active: () -> boolean, onStep: (number) -> ()): { RBXScriptConnection }
 	local function onWheel(direction: number)
@@ -146,12 +149,43 @@ function Input.connectResize(mouse: PluginMouse, active: () -> boolean, onStep: 
 	end
 	return {
 		mouse.WheelForward:Connect(function()
-			onWheel(1)
-		end),
-		mouse.WheelBackward:Connect(function()
 			onWheel(-1)
 		end),
+		mouse.WheelBackward:Connect(function()
+			onWheel(1)
+		end),
 	}
+end
+
+-- A key press, from the 3D view or the panel (see Input.onKey).
+export type Key = { KeyCode: Enum.KeyCode }
+
+local keyEvent = Instance.new("BindableEvent")
+-- The same press can reach both sources; a repeat within this many seconds is dropped.
+local KEY_REPEAT = 0.05
+-- Keys right after a panel text field loses focus belong to that field (Enter commits it).
+local TYPING_GRACE = 0.15
+local lastKey: Enum.KeyCode? = nil
+local lastKeyAt = 0
+
+local function fireKey(keyCode: Enum.KeyCode)
+	local now = os.clock()
+	if keyCode == lastKey and now - lastKeyAt < KEY_REPEAT then
+		return
+	end
+	lastKey, lastKeyAt = keyCode, now
+	local key: Key = { KeyCode = keyCode }
+	keyEvent:Fire(key)
+end
+
+--[[
+	Calls `handler` on every key press while Studio's 3D view or the Strata panel has keyboard
+	focus. UserInputService alone misses keys while the panel has focus (after clicking any panel
+	button), which made Esc, Enter, X and [ ] seem to do nothing. Keys typed into a panel text
+	field are left to it. Handlers still check `GetFocusedTextBox` for other Studio fields.
+]]
+function Input.onKey(handler: (Key) -> ()): RBXScriptConnection
+	return keyEvent.Event:Connect(handler)
 end
 
 --[[
@@ -160,6 +194,26 @@ end
 ]]
 function Input.start(widget: DockWidgetPluginGui, isToolRunning: () -> boolean): () -> ()
 	tracking = isToolRunning
+
+	-- Panel text fields with keyboard focus, so their typing is not taken for shortcuts.
+	local typingIn: TextBox? = nil
+	local typingEndedAt = 0
+	local function watchTextBox(inst: Instance)
+		if inst:IsA("TextBox") then
+			inst.Focused:Connect(function()
+				typingIn = inst
+			end)
+			inst.FocusLost:Connect(function()
+				if typingIn == inst then
+					typingIn = nil
+				end
+				typingEndedAt = os.clock()
+			end)
+		end
+	end
+	for _, inst in widget:GetDescendants() do
+		watchTextBox(inst)
+	end
 
 	local listener = Instance.new("Frame")
 	listener.Name = "StrataKeyListener"
@@ -173,13 +227,23 @@ function Input.start(widget: DockWidgetPluginGui, isToolRunning: () -> boolean):
 		listener.InputBegan:Connect(function(input: InputObject)
 			if MODIFIERS[input.KeyCode] then
 				panelKeys[input.KeyCode] = true
+			elseif
+				input.UserInputType == Enum.UserInputType.Keyboard
+				and not typingIn
+				and os.clock() - typingEndedAt > TYPING_GRACE
+				-- A dropdown under keyboard control takes these keys itself.
+				and not KeyCapture.active()
+			then
+				fireKey(input.KeyCode)
 			end
 		end),
+		widget.DescendantAdded:Connect(watchTextBox),
 		listener.InputEnded:Connect(function(input: InputObject)
 			panelKeys[input.KeyCode] = nil
 		end),
 		widget.WindowFocusReleased:Connect(function()
 			table.clear(panelKeys)
+			typingIn = nil
 		end),
 		-- Any key the 3D view reports means focus is back there, where IsKeyDown is accurate.
 		UserInputService.InputBegan:Connect(function(input: InputObject)
@@ -187,6 +251,11 @@ function Input.start(widget: DockWidgetPluginGui, isToolRunning: () -> boolean):
 				table.clear(panelKeys)
 				if CAMERA_KEYS[input.KeyCode] then
 					release()
+				end
+				-- Checked here, when the key arrives: by the time a handler runs (signals can be
+				-- deferred), Enter or Esc may already have ended the text edit.
+				if not UserInputService:GetFocusedTextBox() and not typingIn then
+					fireKey(input.KeyCode)
 				end
 			elseif input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton3 then
 				release()

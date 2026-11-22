@@ -56,6 +56,8 @@ return table.freeze({
 	Clear = item("x"),
 	ClearPaint = item("eraser"),
 	SimplifyMode = item("triangle"),
+	PaintMode = item("paintbrush"),
+	EraseMode = item("eraser"),
 	CutMode = item("scissors"),
 	RestoreHoles = item("rotate-ccw"),
 	RestorePoints = item("rotate-ccw"),

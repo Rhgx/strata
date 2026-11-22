@@ -95,7 +95,7 @@ local function idleText(settings: Settings.State, ctx: Context): string
 		elseif settings.paintSelectedOnly and ctx.info.count == 0 then
 			return "Select tiles to paint."
 		end
-		return "Painting materials. Ctrl erases."
+		return if settings.paintErase then "Erasing paint. Ctrl paints." else "Painting materials. Ctrl erases."
 	elseif page == "mesh" then
 		if not hasTiles then
 			return "No terrain yet."

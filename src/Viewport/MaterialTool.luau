@@ -6,7 +6,7 @@
 
 	Viewport controls:
 		Left drag          paint the look
-		Ctrl               erase (back to each tile's own look)
+		Ctrl               erase (back to each tile's own look); paints instead in Erase mode
 		Alt + right click  pick up the look of any part or tile under the cursor
 		Ctrl + scroll      resize the brush ([ and ] too, on layouts that have them)
 		Esc                stop
@@ -62,6 +62,11 @@ local function describe(look: Displacement.Look): string
 		name = `{name} ({look.variant})`
 	end
 	return `{name}, #{look.color:ToHex():upper()}`
+end
+
+-- Whether a stroke now erases: Erase mode, or Paint mode with Ctrl held (Ctrl swaps them).
+local function erasing(settings: Settings.State): boolean
+	return settings.paintErase ~= Input.ctrl()
 end
 
 local function newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
@@ -151,7 +156,7 @@ return function(plugin: Plugin): () -> ()
 	local function paintAt(models: { Model }, hit: TileHit.Hit)
 		local settings = Settings.get()
 		local radius = settings.radius
-		local erase = Input.ctrl()
+		local erase = erasing(settings)
 		local look: Displacement.Look = { material = settings.paintMaterial, color = settings.paintColor, variant = settings.paintVariant }
 		local samples, travel = TriangleBrush.samples(lastCenter, hit.position, radius)
 		lastCenter = hit.position
@@ -219,6 +224,8 @@ return function(plugin: Plugin): () -> ()
 				s.paintMaterial = part.Material
 				s.paintColor = part.Color
 				s.paintVariant = part.MaterialVariant
+				-- Picking a look means painting with it next.
+				s.paintErase = false
 			end
 		end)
 		if part then
@@ -243,7 +250,12 @@ return function(plugin: Plugin): () -> ()
 		if recording then
 			endStroke()
 		end
-		if not settings.coloring or Session.isBaking() then
+		if not settings.coloring then
+			return
+		end
+		if Session.isBaking() then
+			-- Say so instead of ignoring the click.
+			Status.post("warning", "Still baking the last edits. Try again in a moment.")
 			return
 		end
 		if settings.pickingLook then
@@ -330,7 +342,7 @@ return function(plugin: Plugin): () -> ()
 	end
 	table.insert(
 		connections,
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			if not Settings.get().coloring or UserInputService:GetFocusedTextBox() then
 				return
 			end
@@ -349,7 +361,7 @@ return function(plugin: Plugin): () -> ()
 			if not settings.coloring then
 				return
 			end
-			local erase = Input.ctrl()
+			local erase = erasing(settings)
 			local hints: { string }
 			if settings.pickingLook then
 				hints = { "<b>Pick a look</b>", "Click any part or tile", "Esc: Stop" }
@@ -357,7 +369,7 @@ return function(plugin: Plugin): () -> ()
 				hints = {
 					`<b>Material</b> ({describe({ material = settings.paintMaterial, color = settings.paintColor, variant = settings.paintVariant })})`,
 					if erase then "Left Drag: Erase" else "Left Drag: Paint",
-					"Ctrl: Erase",
+					if settings.paintErase then "Ctrl: Paint" else "Ctrl: Erase",
 					"Alt + Right Click: Pick look",
 					`Ctrl + Scroll: Size ({formatStuds(settings.radius)})`,
 					"Esc: Stop",

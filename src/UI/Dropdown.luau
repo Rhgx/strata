@@ -38,6 +38,8 @@
 
 local UserInputService = game:GetService("UserInputService")
 
+local KeyCapture = require(script.Parent.Parent.State.KeyCapture)
+
 local Packages = script.Parent.Parent.Parent.Packages
 local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
@@ -143,6 +145,14 @@ local function Dropdown(props: Props)
 
 	local opened, setOpened = React.useState(false)
 	local focused, setFocused = React.useState(false)
+	-- Under keyboard control, the panel's keys are this dropdown's, not the tools' shortcuts.
+	local captureOwner = React.useRef({})
+	React.useEffect(function(): (() -> ())?
+		if focused or opened then
+			return KeyCapture.hold(captureOwner)
+		end
+		return nil
+	end, { focused, opened })
 	local hovered, setHovered = React.useState(false)
 	-- The open list's highlighted row (moved by keys and by the mouse).
 	local highlight, setHighlight = React.useState(0)

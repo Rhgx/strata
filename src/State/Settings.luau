@@ -43,6 +43,8 @@ export type State = {
 	recentLooks: { RecentLook },
 	-- Material tool: paint single triangles instead of whole grid cells.
 	paintFine: boolean,
+	-- Material tool: erase painted looks back to each tile's own (Ctrl swaps paint and erase).
+	paintErase: boolean,
 	-- The Mesh tool: removes points or cuts holes.
 	meshing: boolean,
 	meshMode: MeshMode,
@@ -195,6 +197,7 @@ local state: State = table.freeze({
 	paintVariant = "",
 	recentLooks = {},
 	paintFine = false,
+	paintErase = false,
 	meshing = false,
 	meshMode = "Simplify" :: MeshMode,
 	simplifyAngle = 5,

@@ -90,6 +90,12 @@ local function worldAxis(axis: Axis, picked: Vector3): Vector3?
 	return nil
 end
 
+-- The brush's world axis, or nil for the per-tile axes (Face normal, Curved).
+function Paint.worldAxisOf(brush: Brush): Vector3?
+	local axis = worldAxis(brush.axis, brush.pickedAxis)
+	return if axis and axis.Magnitude > 1e-6 then axis.Unit else nil
+end
+
 -- The paint axis of one vertex, in the displacement's local space. Not normalized (Hammer uses
 -- the axis as given; offset normals can be shorter than 1 after a sew).
 local function localAxis(item: Item, brush: Brush, index: number): Vector3

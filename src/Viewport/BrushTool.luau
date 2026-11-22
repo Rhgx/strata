@@ -402,6 +402,33 @@ return function(plugin: Plugin): () -> ()
 	-- Ctrl + click with Raise To: take the height from the terrain under the cursor.
 	local function pickHeight()
 		local settings = Settings.get()
+		-- From World with a world axis: any visible part counts (a road or pad to match), not
+		-- just terrain.
+		local axis = if settings.raiseToWorld then Paint.worldAxisOf(brushFor("RaiseTo", settings)) else nil
+		if axis then
+			local ray = mouse.UnitRay
+			local exclude: { Instance } = {}
+			for _ = 1, 8 do
+				local params = RaycastParams.new()
+				params.FilterType = Enum.RaycastFilterType.Exclude
+				params.FilterDescendantsInstances = exclude
+				local result = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
+				if not result then
+					break
+				end
+				local part = result.Instance
+				if part:IsA("BasePart") and part.Transparency >= 0.99 then
+					table.insert(exclude, part)
+					continue
+				end
+				local height = math.round(result.Position:Dot(axis) * 10) / 10
+				Settings.update(function(s)
+					s.height = height
+				end)
+				Status.post("success", `Raise To height set to {formatStuds(height)} studs from {part.Name}.`)
+				return
+			end
+		end
 		local hit = findHit(workingModels())
 		local opened = if hit then hit.opened else nil
 		if not hit or not opened then
@@ -427,7 +454,12 @@ return function(plugin: Plugin): () -> ()
 		end
 		-- A new press ends a resize whose button release was missed.
 		resize = nil
-		if not settings.painting or Session.isBaking() then
+		if not settings.painting then
+			return
+		end
+		if Session.isBaking() then
+			-- Say so instead of ignoring the click.
+			Status.post("warning", "Still baking the last edits. Try again in a moment.")
 			return
 		end
 		-- Alt+drag resizes the brush instead of painting.
@@ -538,7 +570,7 @@ return function(plugin: Plugin): () -> ()
 
 	table.insert(
 		connections,
-		UserInputService.InputBegan:Connect(function(input)
+		Input.onKey(function(input: Input.Key)
 			if not Settings.get().painting or UserInputService:GetFocusedTextBox() then
 				return
 			end
@@ -593,10 +625,13 @@ return function(plugin: Plugin): () -> ()
 						s.radius = radius
 					end)
 				end
-				local held = lastHit
+				-- The ring stays where the drag started (or the surface along the drag's first ray),
+				-- with the size next to it.
+				local held = lastHit or findHit(workingModels(), resizing.ray)
 				if held then
 					local current = Settings.get()
 					placeCursor(held.position, displayNormal or held.normal, current, mode, effectiveAt(held, mode, current))
+					RadiusPreview.label(held.position, `Radius {formatStuds(current.radius)} st`)
 				end
 				return
 			end
