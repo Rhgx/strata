@@ -466,10 +466,9 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 					PointEditor.enter()
 				end)
 			end,
-			"**Move single points** with Studio's own tools.\n\n"
-				.. "Puts a handle on every point of the selected tiles: select them in 3D and use `Move`, `Rotate`, or `Scale`, "
-				.. "or press `Delete` to remove them.\n\n"
-				.. "> Seams stay closed. `Ctrl + Z` undoes each move.",
+			"**Move or remove points** with Studio's tools.\n\n"
+				.. "Puts a handle on every point of the selected tiles.\n\n"
+				.. "> Seams stay closed.",
 			false,
 			Icons.EditPoints
 		),

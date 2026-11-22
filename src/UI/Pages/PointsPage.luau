@@ -28,7 +28,8 @@ local function PointsPage()
 			1,
 			"Edit points",
 			stop,
-			"**Finish editing points**.\n\nBakes edited tiles if `Bake automatically` is on."
+			"**Finish editing points** and select the tiles again.\n\n"
+				.. "Bakes edited tiles if `Bake automatically` is on."
 		),
 
 		Points = Rows.value(
@@ -36,27 +37,27 @@ local function PointsPage()
 			"Points",
 			`{Format.count(info.selected)} of {Format.count(info.points)} selected`,
 			nil,
-			"**Point handles** on the edited tiles.\n\n"
-				.. "Points shared by tiles have one handle, so seams stay closed."
+			"**Point handles** on these tiles.\n\n"
+				.. "- **Select**: click, `Ctrl + Click`, or drag a box.\n"
+				.. "- **Move**: use `Move`, `Rotate`, or `Scale`.\n"
+				.. "- **Remove**: press `Delete` (tile corners stay).\n\n"
+				.. "> Exact coordinates: `Pivot > Origin` in Properties."
 		),
 
-		Tiles = Rows.value(3, "Tiles", Format.plural(info.tiles, "tile"), nil, "**Tiles being edited**.\n\n> Done selects them again."),
+		Tiles = Rows.value(3, "Tiles", Format.plural(info.tiles, "tile"), nil, "**Tiles being edited.**\n\n> `Done` selects them again."),
 
-		Usage = Rows.paragraph(
-			4,
-			"Select points in 3D (click, Ctrl + click, or drag a box), then move them with Studio's Move, Rotate, or Scale tools, "
-				.. "or press Delete to remove them. For exact coordinates, edit Pivot > Origin in Properties."
-		),
+		Usage = Rows.paragraph(4, "Select handles in 3D, then use Move, Rotate, Scale, or Delete.", "dimmed"),
 
 		Simplified = if info.simplified > 0
-			then Rows.paragraph(5, "Points removed by Simplify have no handle; they follow the surface.")
+			then Rows.paragraph(5, "Points removed by Simplify have no handle.", "dimmed")
 			else nil,
 
 		SelectAll = Rows.button(
 			6,
 			"Select all points",
 			PointEditor.selectAll,
-			"**Select every point** on the edited tiles.\n\n> Then Move or Rotate them together.",
+			"**Select every handle** on these tiles.\n\n"
+				.. "`Move` shifts the group, `Rotate` swings it around its center, and `Scale` spreads or gathers it.",
 			info.points == 0,
 			Icons.SelectAll
 		),
@@ -65,7 +66,9 @@ local function PointsPage()
 			7,
 			"Done",
 			stop,
-			"**Finish editing points** and select the tiles again.\n\n> Each move undoes on its own with `Ctrl + Z`.",
+			"**Finish editing points** and select the tiles again.\n\n"
+				.. "Bakes edited tiles if `Bake automatically` is on.\n\n"
+				.. "> Each move or delete undoes with `Ctrl + Z`.",
 			false,
 			Icons.ApplyMarks,
 			true

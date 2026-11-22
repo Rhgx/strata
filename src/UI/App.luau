@@ -125,7 +125,7 @@ local function idleText(settings: Settings.State, ctx: Context): string
 	elseif page == "stitch" then
 		return if hasTiles then "Click a part to stitch." else "No terrain yet."
 	elseif page == "points" then
-		return "Move points with Studio's tools."
+		return "Select handles to move or delete."
 	elseif page == "tiles" then
 		if settings.sampling then
 			return "Click a part to copy its look (Esc cancels)."

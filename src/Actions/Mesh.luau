@@ -284,9 +284,10 @@ function MeshActions.applyMarks(): (number, number)
 end
 
 -- Removes `points` right away as one undo step (deleting handles in Edit points), mirrored across
--- seams like Apply. Corners always stay and are skipped. Returns how many points were removed on
--- the given tiles.
-function MeshActions.removePoints(points: { [Opened]: { number } }): number
+-- seams like Apply. Corners always stay and are skipped. With `append`, the removal joins the
+-- previous undo step (Studio's own Delete). Returns how many points were removed on the given
+-- tiles.
+function MeshActions.removePoints(points: { [Opened]: { number } }, append: boolean?): number
 	local marked: { [Opened]: { [number]: MeshStage.Mark } } = {}
 
 	for opened, list in points do
@@ -313,7 +314,7 @@ function MeshActions.removePoints(points: { [Opened]: { number } }): number
 		local _, count = applyPointMarks(marked)
 		removed = count
 		Recording.autoBake()
-	end)
+	end, append)
 
 	return removed
 end

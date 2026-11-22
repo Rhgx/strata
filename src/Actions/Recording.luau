@@ -15,7 +15,8 @@ local Session = require(Plugin.Scene.Session)
 local Recording = {}
 
 -- Executes `action` inside a single undo step named `name`, re-raising any error after cancelling.
-function Recording.run(name: string, action: () -> ())
+-- With `append`, the changes join the previous undo step instead of starting their own.
+function Recording.run(name: string, action: () -> (), append: boolean?)
 	local recording = ChangeHistoryService:TryBeginRecording(name)
 
 	if not recording then
@@ -29,7 +30,10 @@ function Recording.run(name: string, action: () -> ())
 
 	ChangeHistoryService:FinishRecording(
 		recording,
-		if ok then Enum.FinishRecordingOperation.Commit else Enum.FinishRecordingOperation.Cancel
+		if not ok
+			then Enum.FinishRecordingOperation.Cancel
+			elseif append then Enum.FinishRecordingOperation.Append
+			else Enum.FinishRecordingOperation.Commit
 	)
 
 	if not ok then

@@ -11,6 +11,11 @@
 	climb a little with every mouse move over its own tile; resting on the point it cannot. Exact
 	coordinates are in Properties under Pivot > Origin.
 
+	Handles keep a locked frame (their tile's normal and grid direction), so Local-space gizmos
+	stay meaningful. Rotating a group still swings its points around the group's center; once a
+	handle is still, its rotation, size, and pivot are put back. A rotation that moved nothing (a
+	single handle) is rejected with a brief flash and a status hint.
+
 	Undo: Studio's draggers do not record; they set a waypoint when a drag ends. Handles are
 	untracked, so those waypoints stay empty, and every change to the terrain is made here inside
 	our own recording: one per frame at most, the first of a burst committed as a new step and the
@@ -65,8 +70,18 @@ type Handle = {
 	members: { Member },
 	-- Ball diameter, restored after Studio's Scale tool resizes the handle.
 	size: number,
-	-- World direction the handle rests along (the first member's tile face normal).
+	-- The handle's locked frame: `up` is the direction it rests along (its tiles' face normal,
+	-- averaged where tiles meet) and `right` follows its tile's grid, so Local-space gizmos move
+	-- along the tile normal and grid axes.
 	up: Vector3,
+	right: Vector3,
+}
+
+-- A handle whose CFrame, Size, or PivotOffset changed, until it has been still for QUIET.
+type Change = {
+	at: number,
+	-- Whether its point moved during the change; a rotation that moved nothing was rejected.
+	moved: boolean,
 }
 
 -- Tags the handle folder so other code can recognize it.
@@ -79,6 +94,8 @@ local SAME = 1e-4
 -- Points of neighboring tiles at the same flat position within this distance are one point
 -- (matching Edges.seamTwins and Sew).
 local TWIN_DISTANCE = 1 / 16
+-- How long deleted handles wait for another recording (Studio's own Delete) to finish.
+local DELETE_WAIT = 5
 -- Beyond this many handles Studio slows down and the points become an unreadable cloud.
 local MAX_HANDLES = 2500
 -- Handle diameter as a share of the grid spacing, clamped to stay clickable and not overlap.
@@ -86,6 +103,17 @@ local SIZE_SHARE = 0.3
 local MIN_SIZE = 0.15
 local MAX_SIZE = 0.8
 local COLOR = Color3.fromRGB(255, 176, 32)
+-- Handles snap back to their locked frame, size, and pivot once still this long, so Studio's
+-- Rotate and Scale drags are never fought mid-drag.
+local QUIET = 0.12
+-- Rotation drift beyond this dot product (about 0.8 degrees) counts as rotated; well above the
+-- rounding of our own writes, so restoring a handle never loops.
+local ROTATED_DOT = 1 - 1e-4
+-- A rejected rotation flashes the handle in this color, for this long.
+local PULSE_COLOR = Color3.fromRGB(255, 80, 80)
+local PULSE_TIME = 0.25
+-- The rejected rotation message repeats at most this often.
+local HINT_GAP = 3
 
 local PointEditor = {}
 
@@ -99,8 +127,8 @@ local byPart: { [BasePart]: Handle } = {}
 local models: { Model } = {}
 local layouts: { [Model]: string } = {}
 local dirty: { [Handle]: true } = {}
--- Handles moved in the current burst, checked for Scale tool resizing once it settles.
-local touched: { [Handle]: true } = {}
+local changes: { [Handle]: Change } = {}
+local lastHint = -math.huge
 local lastFlush = -math.huge
 -- Set by undo and redo so the next edit always starts a new undo step.
 local historyChanged = true
@@ -114,16 +142,18 @@ local pending: { Model } = {}
 -- Defers a resync to the end of the frame (defined below, after the functions it needs).
 local scheduleResync: () -> ()
 
-local function upright(position: Vector3, up: Vector3): CFrame
-	local right = up:Cross(Vector3.zAxis)
-
-	if right.Magnitude < 1e-3 then
-		right = up:Cross(Vector3.xAxis)
-	end
-
-	return CFrame.fromMatrix(position, right.Unit, up)
+local function frameOf(handle: Handle, position: Vector3): CFrame
+	return CFrame.fromMatrix(position, handle.right, handle.up)
 end
 
+-- Whether the handle's rotation has left its locked frame.
+local function rotated(handle: Handle): boolean
+	local cframe = handle.part.CFrame
+
+	return cframe.UpVector:Dot(handle.up) < ROTATED_DOT or cframe.RightVector:Dot(handle.right) < ROTATED_DOT
+end
+
+-- Includes the tile's pivot, so moving or rotating a tile rebuilds its handles in the new frame.
 local function layoutOf(opened: Opened): string
 	local removed = 0
 
@@ -131,7 +161,7 @@ local function layoutOf(opened: Opened): string
 		removed += 1
 	end
 
-	return `{opened.disp.power}:{removed}`
+	return `{opened.disp.power}:{removed}:{opened.model:GetPivot()}`
 end
 
 -- World position of a member's point, or nil when its tile is gone.
@@ -145,8 +175,22 @@ local function pointOf(member: Member): Vector3?
 	return opened.model:GetPivot() * Displacement.position(opened.disp, member.index)
 end
 
+-- Puts the handle back in its locked frame, size, and pivot, resting on `point`.
 local function place(handle: Handle, point: Vector3)
-	handle.part:PivotTo(upright(point, handle.up))
+	local part = handle.part
+
+	if math.abs(part.Size.X - handle.size) > SAME or math.abs(part.Size.Y - handle.size) > SAME or math.abs(part.Size.Z - handle.size) > SAME then
+		part.Size = Vector3.one * handle.size
+	end
+
+	part.PivotOffset = CFrame.new(0, -handle.size / 2, 0)
+	part:PivotTo(frameOf(handle, point))
+end
+
+-- Where a handle's point is according to the handle: its pivot with the handle's own offset,
+-- so a pivot edited in Properties or with Edit Pivot never moves the point.
+local function targetOf(handle: Handle): Vector3
+	return (handle.part.CFrame * CFrame.new(0, -handle.size / 2, 0)).Position
 end
 
 -- Moves handles back onto their points (after undo, redo, a tile moving, or seams following an
@@ -159,7 +203,7 @@ local function reposition(skip: { [Handle]: true }?)
 
 		local point = pointOf(handle.members[1])
 
-		if point and (handle.part:GetPivot().Position - point).Magnitude > SAME then
+		if point and (targetOf(handle) - point).Magnitude > SAME then
 			place(handle, point)
 		end
 	end
@@ -283,17 +327,43 @@ local function spacingOf(opened: Opened): number
 	return math.min(a, b) / segments
 end
 
-local function markDirty(handle: Handle)
-	dirty[handle] = true
+-- Notes a change to a handle; a CFrame change may also have moved its point.
+local function noteChange(handle: Handle, moved: boolean)
+	if moved then
+		dirty[handle] = true
+	end
+
+	local change = changes[handle]
+
+	if change then
+		change.at = os.clock()
+	else
+		changes[handle] = { at = os.clock(), moved = false }
+	end
 end
 
 -- Handles deleted since the last removal pass, removed together as one undo step.
 local deleted: { Handle } = {}
-local deleteScheduled = false
+local deletedAt = 0
+-- Whether a recording (Studio's own Delete) was open when the handles went. Studio still adds
+-- that step even though handles are untracked, so the removal joins it: one Ctrl + Z restores.
+local deletedInRecording = false
 
--- Removes the points of deleted handles, then rebuilds (bringing back any corner handle).
+-- Removes the points of deleted handles, then rebuilds (bringing back any corner handle). Runs
+-- from the Heartbeat flush: Studio's own Delete is still recording when the handles go, so this
+-- waits for that recording (or a bake) to finish rather than failing to start its own.
 local function removeDeleted()
-	deleteScheduled = false
+	if Session.isBaking() or ChangeHistoryService:IsRecordingInProgress() then
+		if os.clock() - deletedAt < DELETE_WAIT then
+			return
+		end
+
+		Status.post("error", "Could not remove points while Studio is busy.")
+		table.clear(deleted)
+		table.clear(layouts)
+		scheduleResync()
+		return
+	end
 
 	local list = deleted
 	deleted = {}
@@ -329,15 +399,15 @@ local function removeDeleted()
 		removable += 1
 	end
 
-	local note = if corners > 0 then ` Tile corners always stay ({corners} kept).` else ""
-	local ok, err = pcall(MeshActions.removePoints, points)
+	local note = if corners > 0 then ` ({Format.plural(corners, "corner")} kept)` else ""
+	local ok, err = pcall(MeshActions.removePoints, points, deletedInRecording)
 
 	if not ok then
 		Status.post("error", `Could not remove points: {err}`)
 	elseif removable > 0 then
-		Status.post("success", `Removed {Format.plural(removable, "point")}.{note}`)
+		Status.post("success", `Removed {Format.plural(removable, "point")}{note}.`)
 	elseif corners > 0 then
-		Status.post("warning", "Tile corners always stay, so they cannot be removed.")
+		Status.post("warning", "Tile corners cannot be removed.")
 	end
 
 	-- A cleared layout forces a full rebuild, so every point that still exists gets its handle back.
@@ -351,7 +421,7 @@ end
 -- current handle or the current handle folder: everything we remove ourselves is forgotten first.
 local function onRemoved(child: Instance)
 	if child == container then
-		Status.post("warning", "The point handles' folder cannot be deleted or moved. Select points to remove them.")
+		Status.post("warning", "Cannot move or delete the handles folder; delete handles directly.")
 		table.clear(layouts)
 		scheduleResync()
 		return
@@ -364,14 +434,14 @@ local function onRemoved(child: Instance)
 	end
 
 	if child.Parent == nil then
-		table.insert(deleted, handle)
-
-		if not deleteScheduled then
-			deleteScheduled = true
-			task.defer(removeDeleted)
+		if #deleted == 0 then
+			deletedAt = os.clock()
+			deletedInRecording = ChangeHistoryService:IsRecordingInProgress()
 		end
+
+		table.insert(deleted, handle)
 	else
-		Status.post("warning", "Points cannot be grouped or moved out. Delete points to remove them.")
+		Status.post("warning", "Handles cannot be grouped or moved out of their folder.")
 		table.clear(layouts)
 		scheduleResync()
 	end
@@ -383,7 +453,7 @@ local function clearHandles()
 	table.clear(handles)
 	table.clear(byPart)
 	table.clear(dirty)
-	table.clear(touched)
+	table.clear(changes)
 
 	if old then
 		old:Destroy()
@@ -422,10 +492,10 @@ local function build(): boolean
 		return false
 	end
 
-	local groups, count = collect(edited)
+	local groups = collect(edited)
 
 	if not groups then
-		Status.post("error", `Too many points ({Format.count(count)}+). Select fewer tiles, at most {Format.count(MAX_HANDLES)} points.`)
+		Status.post("error", `Over {Format.count(MAX_HANDLES)} points; select fewer tiles.`)
 		return false
 	end
 
@@ -444,10 +514,41 @@ local function build(): boolean
 	local reselect: { Instance } = {}
 	local sizes: { [Model]: number } = {}
 	local normals: { [Model]: Vector3 } = {}
+	-- Each tile's first grid edge in world space, giving handles the tile's own grid direction.
+	local edges: { [Model]: Vector3 } = {}
 
 	for _, opened in edited do
+		local pivot = opened.model:GetPivot()
+		local corners = opened.disp.corners
 		sizes[opened.model] = math.clamp(spacingOf(opened) * SIZE_SHARE, MIN_SIZE, MAX_SIZE)
-		normals[opened.model] = opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		normals[opened.model] = pivot:VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		edges[opened.model] = pivot:VectorToWorldSpace(corners[2] - corners[1])
+	end
+
+	-- A handle rests along its tiles' averaged normal, so where tiles meet at an angle the ball
+	-- sits outside both, whichever tile comes first; it falls back to the first tile's normal
+	-- when the normals cancel out.
+	local function frameFor(members: { Member }): (Vector3, Vector3)
+		local first = members[1].model
+		local sum = Vector3.zero
+		local seen: { [Model]: true } = {}
+
+		for _, member in members do
+			if not seen[member.model] then
+				seen[member.model] = true
+				sum += normals[member.model]
+			end
+		end
+
+		local up = if sum.Magnitude > 1e-3 then sum.Unit else normals[first]
+		local edge = edges[first]
+		local right = edge - up * edge:Dot(up)
+
+		if right.Magnitude < 1e-3 then
+			right = up:Cross(if math.abs(up.Y) < 0.9 then Vector3.yAxis else Vector3.xAxis)
+		end
+
+		return up, right.Unit
 	end
 
 	-- Filled while unparented, then added to the place at once: one insertion instead of one per
@@ -476,9 +577,9 @@ local function build(): boolean
 		part.CanTouch = false
 		part.CastShadow = false
 		part.Archivable = false
-		part.PivotOffset = CFrame.new(0, -size / 2, 0)
 
-		local handle: Handle = { part = part, members = members, size = size, up = normals[first.model] }
+		local up, right = frameFor(members)
+		local handle: Handle = { part = part, members = members, size = size, up = up, right = right }
 		place(handle, point)
 		part.Parent = holder
 
@@ -486,7 +587,17 @@ local function build(): boolean
 		byPart[part] = handle
 
 		part:GetPropertyChangedSignal("CFrame"):Connect(function ()
-			markDirty(handle)
+			noteChange(handle, true)
+		end)
+
+		-- Resizing a single handle or editing its pivot (Edit Pivot, Properties) moves no point;
+		-- the handle is just put back once still.
+		part:GetPropertyChangedSignal("Size"):Connect(function ()
+			noteChange(handle, false)
+		end)
+
+		part:GetPropertyChangedSignal("PivotOffset"):Connect(function ()
+			noteChange(handle, false)
 		end)
 
 		if selectedKeys[`{first.model:GetDebugId()}:{first.index}`] then
@@ -545,6 +656,7 @@ local function deactivate()
 
 	table.clear(models)
 	table.clear(layouts)
+	table.clear(deleted)
 
 	local state = Settings.get()
 
@@ -593,34 +705,83 @@ local function topIsOurs(): boolean
 	return name == RECORDING
 end
 
--- Restores handle sizes the Scale tool changed, once the burst that changed them has settled.
-local function settle()
-	if next(touched) == nil or os.clock() - lastFlush <= BURST_GAP then
-		return
-	end
+-- Briefly flashes a handle whose rotation was rejected, right where the user is looking.
+local function pulse(handle: Handle)
+	local part = handle.part
+	part.Color = PULSE_COLOR
 
-	for handle in touched do
+	task.delay(PULSE_TIME, function ()
+		if part.Parent then
+			part.Color = COLOR
+		end
+	end)
+end
+
+-- Puts handles that have been still for QUIET back in their locked frame, size, and pivot.
+-- Doing this only once a handle is still never fights Studio's Rotate or Scale tool mid-drag.
+-- A rotation that moved no point (a single handle, or an Orientation edit in Properties) was
+-- rejected: the handle flashes and the status bar says why.
+local function restore()
+	local now = os.clock()
+	local rejected: { Handle } = {}
+	local anyMoved = false
+
+	for handle, change in changes do
+		if now - change.at < QUIET or dirty[handle] then
+			continue
+		end
+
+		changes[handle] = nil
+
 		local part = handle.part
+		local point = if part.Parent then pointOf(handle.members[1]) else nil
 
-		if part.Parent and math.abs(part.Size.X - handle.size) > SAME then
-			part.Size = Vector3.one * handle.size
-			part.PivotOffset = CFrame.new(0, -handle.size / 2, 0)
+		if not point then
+			continue
+		end
 
-			local point = pointOf(handle.members[1])
+		local wasRotated = rotated(handle)
+		local off = wasRotated
+			or math.abs(part.Size.X - handle.size) > SAME
+			or math.abs(part.Size.Y - handle.size) > SAME
+			or math.abs(part.Size.Z - handle.size) > SAME
+			or (part.PivotOffset.Position - Vector3.new(0, -handle.size / 2, 0)).Magnitude > SAME
+			or (part:GetPivot().Position - point).Magnitude > SAME
 
-			if point then
-				place(handle, point)
-			end
+		if off then
+			place(handle, point)
+		end
+
+		if change.moved then
+			anyMoved = true
+		elseif wasRotated then
+			table.insert(rejected, handle)
 		end
 	end
 
-	table.clear(touched)
+	-- A group rotation can leave the point at its center unmoved; that is no rejection.
+	if #rejected == 0 or anyMoved then
+		return
+	end
+
+	for _, handle in rejected do
+		pulse(handle)
+	end
+
+	if now - lastHint > HINT_GAP then
+		lastHint = now
+		Status.post("warning", "Single points cannot rotate. Select multiple points to rotate them as a group.")
+	end
 end
 
 -- Writes moved handles to the terrain, at most once per frame, inside our own recording.
 local function flush()
+	if #deleted > 0 then
+		removeDeleted()
+	end
+
 	if next(dirty) == nil then
-		settle()
+		restore()
 		return
 	end
 
@@ -642,9 +803,16 @@ local function flush()
 
 		local first = handle.members[1]
 		local point = pointOf(first)
-		local target = part:GetPivot().Position
+		local target = targetOf(handle)
 
 		if not point or (point - target).Magnitude <= SAME then
+			continue
+		end
+
+		-- Properties' Orientation (and Ctrl + R or Ctrl + T on some setups) turns a part around its
+		-- center, not its pivot, which would swing the pivot off the point. A rotation that kept the
+		-- ball's center is no move; restore() puts the handle back.
+		if rotated(handle) and (part.Position - (point + handle.up * handle.size / 2)).Magnitude <= SAME then
 			continue
 		end
 
@@ -703,11 +871,16 @@ local function flush()
 	historyChanged = false
 
 	for handle in moved do
-		touched[handle] = true
+		local change = changes[handle]
+
+		if change then
+			change.moved = true
+		end
 	end
 
 	-- Seams may have pulled other edited points along; show them where they are now.
 	reposition(moved)
+	restore()
 end
 
 -- Keeps a selection that includes handles to handles only, so box selecting points does not

@@ -106,7 +106,7 @@ return function (plugin: Plugin, widget: DockWidgetPluginGui): () -> ()
 	local editPoints = plugin:CreatePluginAction(
 		"StrataEditPoints",
 		"Strata: Edit points",
-		"Start or stop editing the points of the selected Strata tiles",
+		"Start or stop editing Strata tile points",
 		"",
 		true
 	)
