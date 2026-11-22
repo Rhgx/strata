@@ -505,7 +505,8 @@ return function(plugin: Plugin): () -> ()
 			hideAll()
 			table.clear(centers)
 			keyStrip.show(nil)
-			if state.autoBake then
+			-- Not when switching to another editing tool (see Settings.editing).
+			if state.autoBake and not Settings.editing(state) then
 				task.spawn(Bake.bakeEdited)
 			end
 		end

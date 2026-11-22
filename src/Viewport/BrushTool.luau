@@ -210,7 +210,8 @@ return function(plugin: Plugin): () -> ()
 		local direction = ray.Direction.Unit
 		local filter: { Instance } = {}
 		for _, model in models do
-			local opened = Session.get(model)
+			-- Peek, not get: hovering must not open every tile in the place at once.
+			local opened = Session.peek(model)
 			if not (opened and snapshots[opened]) then
 				table.insert(filter, model)
 			end
@@ -506,7 +507,8 @@ return function(plugin: Plugin): () -> ()
 			keyStrip.show(nil)
 			lastHit = nil
 			displayNormal = nil
-			if state.autoBake then
+			-- Not when switching to another editing tool (see Settings.editing).
+			if state.autoBake and not Settings.editing(state) then
 				task.spawn(Bake.bakeEdited)
 			end
 		end

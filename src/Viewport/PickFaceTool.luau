@@ -2,8 +2,9 @@
 --[[
 	Pick faces mode: click faces of parts in the viewport to collect them, then Create converts
 	all of them at once (one undo step, one bake), like selecting faces in Hammer's Face Edit
-	before pressing Create. Clicking a picked face again removes it. Leaving the mode (the Pick
-	faces button, Esc, another Strata or Studio tool) clears the picks.
+	before pressing Create. Clicking a picked face again removes it. Enter creates from the 3D
+	view; the first Esc clears the picks and the next one stops the tool (see Activation).
+	Leaving the mode (the Pick faces button, Esc, another Strata or Studio tool) clears the picks.
 
 	Highlights are thin boxes rather than SurfaceSelection, which only knows the six box faces
 	and would float off a wedge's slope.
@@ -12,10 +13,13 @@
 local CollectionService = game:GetService("CollectionService")
 local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local PartFaces = require(script.Parent.Parent.Core.PartFaces)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
+local Create = require(script.Parent.Parent.Actions.Create)
+local KeyStrip = require(script.Parent.KeyStrip)
 
 export type Pick = {
 	part: BasePart,
@@ -106,6 +110,8 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 	local pickedBoxes: { BoxHandleAdornment } = {}
 	local hovered: Pick? = nil
 	local connections: { RBXScriptConnection } = {}
+	local keyStrip = KeyStrip.new("StrataPickHints")
+	local lastHints: string? = nil
 
 	local function refreshPicked()
 		for _, box in pickedBoxes do
@@ -158,10 +164,24 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 	table.insert(
 		connections,
 		RunService.Heartbeat:Connect(function()
-			if not Settings.get().picking then
+			local settings = Settings.get()
+			if not settings.picking then
 				hover.Visible = false
 				hovered = nil
 				return
+			end
+			local count = #PickFaceTool.picks()
+			local hints = if settings.showKeyHints
+				then table.concat({
+					"<b>Pick faces</b>",
+					"Click: Pick or unpick a face",
+					if count > 0 then `Enter: Create ({count})` else "Enter: Create",
+					if count > 0 then "Esc: Clear picks" else "Esc: Stop",
+				}, KeyStrip.SEPARATOR)
+				else nil
+			if hints ~= lastHints then
+				lastHints = hints
+				keyStrip.show(hints)
 			end
 			local part, face = faceUnderMouse()
 			if part and face then
@@ -184,12 +204,29 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 		end)
 	)
 
+	-- Enter creates terrain from the picks, like the panel's Create button.
+	table.insert(
+		connections,
+		UserInputService.InputBegan:Connect(function(input)
+			if not Settings.get().picking or UserInputService:GetFocusedTextBox() then
+				return
+			end
+			if input.KeyCode ~= Enum.KeyCode.Return and input.KeyCode ~= Enum.KeyCode.KeypadEnter then
+				return
+			end
+			local settings = Settings.get()
+			task.spawn(Create.createPicked, settings.power, settings.tileSize, PickFaceTool.picks(), Settings.stopViewportTool)
+		end)
+	)
+
 	local wasPicking = false
 	local unsubscribeSettings = Settings.subscribe(function(state)
 		if state.picking ~= wasPicking then
 			wasPicking = state.picking
 			if not state.picking then
 				PickFaceTool.clear()
+				keyStrip.show(nil)
+				lastHints = nil
 			end
 			refreshPicked()
 		end
@@ -203,6 +240,7 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 			connection:Disconnect()
 		end
 		hover:Destroy()
+		keyStrip.destroy()
 		for _, box in pickedBoxes do
 			box:Destroy()
 		end

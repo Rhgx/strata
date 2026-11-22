@@ -74,8 +74,6 @@ return function(plugin: Plugin): () -> ()
 	local mouse = plugin:GetMouse()
 	local connections: { RBXScriptConnection } = {}
 	local keyStrip = KeyStrip.new("StrataStitchHints")
-	-- Set once a click changed something, so stopping the mode bakes.
-	local stitched = false
 	local wasStitching = false
 	local preview: Preview? = nil
 	local computedAt = 0
@@ -241,7 +239,6 @@ return function(plugin: Plugin): () -> ()
 		if not ok then
 			Status.post("error", `Stitch failed: {result}`)
 		elseif result.edges > 0 then
-			stitched = true
 			Status.post(
 				"success",
 				`Stitched {plural(result.edges, "edge")} on {plural(result.tiles, "tile")} to {part.Name}.`
@@ -318,10 +315,11 @@ return function(plugin: Plugin): () -> ()
 		if not state.stitching then
 			hide()
 			keyStrip.show(nil)
-			if stitched and state.autoBake then
+			-- Not when switching to another editing tool (see Settings.editing). Even with nothing
+			-- stitched: an editing tool used before this one may have left tiles to bake.
+			if state.autoBake and not Settings.editing(state) then
 				task.spawn(Bake.bakeEdited)
 			end
-			stitched = false
 		end
 	end)
 

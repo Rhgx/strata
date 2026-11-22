@@ -14,6 +14,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Settings = require(script.Parent.Parent.State.Settings)
 local MeshStage = require(script.Parent.Parent.Scene.MeshStage)
+local PickFaceTool = require(script.Parent.PickFaceTool)
 
 local ICONS = {
 	paint = "rbxasset://SystemCursors/Cross",
@@ -94,6 +95,9 @@ return function(plugin: Plugin): () -> ()
 			elseif Settings.get().meshing and not MeshStage.isEmpty() then
 				-- First Esc drops the Mesh tool's marked points; the next one stops the tool.
 				MeshStage.clear()
+			elseif Settings.get().picking and #PickFaceTool.picks() > 0 then
+				-- Likewise for picked faces.
+				PickFaceTool.clear()
 			else
 				Settings.stopViewportTool()
 			end
