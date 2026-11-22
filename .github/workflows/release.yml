@@ -1,0 +1,112 @@
+# Copyright (C) 2026 Rocks
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Mirrors scripts/release.ps1, plus a check that the tag matches.
+      - name: Verify version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          luau_version=$(sed -nE 's/^return[[:space:]]+"([^"]+)".*/\1/p' src/Version.luau | head -n1)
+          wally_version=$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' wally.toml | head -n1)
+
+          if [[ -z "$luau_version" ]]; then
+            echo "::error file=src/Version.luau::Could not read version string"; exit 1
+          fi
+          if [[ -z "$wally_version" ]]; then
+            echo "::error file=wally.toml::Could not read package version"; exit 1
+          fi
+          if [[ "$luau_version" != "$wally_version" ]]; then
+            echo "::error::Version mismatch: src/Version.luau has '$luau_version' but wally.toml has '$wally_version'"; exit 1
+          fi
+          if [[ "$version" != "$luau_version" ]]; then
+            echo "::error::Tag '$TAG' does not match source version '$luau_version'"; exit 1
+          fi
+
+          semver='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if [[ ! "$version" =~ $semver ]]; then
+            echo "::error::Version '$version' is not valid SemVer"; exit 1
+          fi
+
+          # A hyphen before any "+build" metadata marks a prerelease.
+          if [[ "${version%%+*}" == *-* ]]; then prerelease=true; else prerelease=false; fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "Releasing Strata $version (prerelease: $prerelease)"
+
+      # Pinned binaries from aftman.toml; gh authenticates with GITHUB_TOKEN.
+      - name: Install Rojo and Wally
+        shell: bash
+        run: |
+          set -euo pipefail
+          rojo_version=$(sed -nE 's#^rojo[[:space:]]*=[[:space:]]*"rojo-rbx/rojo@([^"]+)".*#\1#p' aftman.toml)
+          wally_version=$(sed -nE 's#^wally[[:space:]]*=[[:space:]]*"UpliftGames/wally@([^"]+)".*#\1#p' aftman.toml)
+          if [[ -z "$rojo_version" || -z "$wally_version" ]]; then
+            echo "::error file=aftman.toml::Could not read rojo or wally version"; exit 1
+          fi
+
+          bin="$RUNNER_TEMP/bin"
+          mkdir -p "$bin"
+          gh release download "v$rojo_version" -R rojo-rbx/rojo -p "rojo-$rojo_version-linux-x86_64.zip" -D "$RUNNER_TEMP"
+          gh release download "v$wally_version" -R UpliftGames/wally -p "wally-v$wally_version-linux.zip" -D "$RUNNER_TEMP"
+          unzip -o -q "$RUNNER_TEMP/rojo-$rojo_version-linux-x86_64.zip" -d "$bin"
+          unzip -o -q "$RUNNER_TEMP/wally-v$wally_version-linux.zip" -d "$bin"
+          chmod +x "$bin/rojo" "$bin/wally"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Build Strata.rbxm
+        shell: bash
+        run: |
+          set -euo pipefail
+          rojo --version
+          wally --version
+          # default.project.json maps Packages/, which only exists after wally install.
+          wally install
+          rojo build default.project.json -o Strata.rbxm
+          test -s Strata.rbxm
+          sha256sum Strata.rbxm > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          NOTES: |
+            Download `Strata.rbxm` and place it in your Roblox Studio Plugins folder. Keep the filename `Strata.rbxm`.
+        run: |
+          set -euo pipefail
+          # Re-run safe: if the release already exists, replace its assets.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; replacing assets."
+            gh release upload "$TAG" Strata.rbxm SHA256SUMS.txt --clobber
+          else
+            args=(--verify-tag --title "Strata v$VERSION" --generate-notes --notes "$NOTES")
+            if [[ "$PRERELEASE" == "true" ]]; then args+=(--prerelease); fi
+            gh release create "$TAG" Strata.rbxm SHA256SUMS.txt "${args[@]}"
+          fi
