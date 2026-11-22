@@ -138,7 +138,7 @@ Drags track pointer movement through a transparent full-widget overlay button (t
 
 ## Viewport cursors and radius preview
 
-- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). Below a tile's point threshold (point mode), the ring dims and an always-on-top marker dot highlights the single nearest movable point the brush will move.
+- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). Always-on-top dots mark every kept point inside the ring, more solid where the brush pushes harder (hidden when the brush holds more than 64 points). When the ring holds no point, it dims and shows faint dots on up to 4 nearest points to aim at.
 - **`Material` and `Mesh` (`Cut holes`)**: `TriangleOutline` traces the outer edges of the exact shown triangles a click will modify (blue to paint, red to erase or cut, green to restore).
 - **`Mesh` (`Simplify`)**: highlights the points a click or drag will remove or restore over a wireframe of the hovered tile, including the nearest point a click always toggles.
 - **`Stitch` and `Pick faces`**: highlight candidate parts, edges, and faces.

@@ -26,9 +26,9 @@
 	  per frame.
 
 	Centers on the exact surface point under the cursor (unlike Hammer's nearest-vertex snap) for
-	smoother tracking in Studio. The ring is always the real radius; below a tile's grid size the
-	brush works in point mode (Paint.isPointMode), moving the nearest point, which a marker shows.
-	While the cursor holds still the same point keeps moving, even once a neighbor measures closer.
+	smoother tracking in Studio. The ring is exactly the brush: only points inside it move, and
+	dots show which ones (Paint.preview). A ring holding no point dims and shows the nearest points
+	faintly, so a brush smaller than the grid shows where to aim.
 ]]
 
 local CoreGui = game:GetService("CoreGui")
@@ -85,7 +85,13 @@ local BACK_FACE_DOT = -0.25
 -- Path subsampling spacing: roughly one-quarter radius apart, capped at MAX_STEPS per frame.
 local STEP_SHARE = 0.25
 local MIN_STEP = 0.5
-local MAX_STEPS = 16
+-- Enough for a 1-stud brush to keep samples under a radius apart on fast drags.
+local MAX_STEPS = 32
+-- Point dots: at most this many (a brush holding more shows none), sized by camera distance.
+local MAX_DOTS = 64
+local DOT_SCALE = 0.008
+local DOT_MIN = 0.12
+local DOT_MAX = 0.4
 -- Keep projecting onto the previous hit plane for a couple frames if a ray slips through a seam.
 local SEAM_FRAMES = 2
 -- Exponential smoothing speed for cursor ring orientation (higher is snappier).
@@ -103,17 +109,12 @@ local MODE_COLORS: { [Paint.Effect]: Color3 } = {
 	RaiseTo = Color3.fromRGB(230, 190, 70),
 }
 
--- The brush size label. In point mode (Paint.isPointMode) the brush moves the single nearest
--- point, so the label says so.
-local function sizeText(radius: number, pointMode: boolean): string
-	if pointMode then
-		return `Radius {Format.studs(radius)} st (1 point)`
-	end
-
+-- The brush size label.
+local function sizeText(radius: number): string
 	return `Radius {Format.studs(radius)} st`
 end
 
-local function keyHints(mode: Paint.Effect, settings: Settings.State, pointMode: boolean): string
+local function keyHints(mode: Paint.Effect, settings: Settings.State): string
 	local parts: { string }
 
 	if mode == "Raise" or mode == "Lower" then
@@ -134,9 +135,7 @@ local function keyHints(mode: Paint.Effect, settings: Settings.State, pointMode:
 		}
 	end
 
-	local size = if pointMode then `{Format.studs(settings.radius)}, 1 point` else Format.studs(settings.radius)
-
-	table.insert(parts, `Ctrl + Scroll: Size ({size})`)
+	table.insert(parts, `Ctrl + Scroll: Size ({Format.studs(settings.radius)})`)
 	table.insert(parts, "Alt + Right Click: Axis")
 	table.insert(parts, "Esc: Stop")
 	return table.concat(parts, SEPARATOR)
@@ -193,10 +192,6 @@ return function (plugin: Plugin): () -> ()
 	local resize: Input.DragResize? = nil
 	-- Whether the current stroke reached points removed by the Mesh tool (see endStroke).
 	local strokeReachedRemoved = false
-	-- Point mode: the point(s) the last sample moved, reused while the cursor holds still.
-	local heldSnap: Paint.Snap? = nil
-	-- The previous frame's mouse ray, to tell a held cursor from a moving one.
-	local lastRay: Ray? = nil
 	local wasPainting = false
 
 	-- Depth-tested primary ring plus a faint always-on-top ghost ring so the cursor stays
@@ -205,19 +200,20 @@ return function (plugin: Plugin): () -> ()
 	local ghost = RadiusPreview.newRing("StrataBrushGhost", true, 0.78)
 	local keyStrip = KeyStrip.new("StrataKeyHints")
 
-	-- Point mode marker: the point the brush will move, drawn on top so it is never hidden.
-	local marker = Instance.new("SphereHandleAdornment")
-	marker.Name = "StrataBrushPoint"
-	marker.Adornee = workspace.Terrain
-	marker.AlwaysOnTop = true
-	marker.ZIndex = 3
-	marker.Visible = false
-	marker.Parent = CoreGui
+	-- Dots on the points the brush would move (and, when it holds none, faint dots on the nearest
+	-- points to aim at), drawn on top so they are never hidden by the terrain.
+	local dots: { SphereHandleAdornment } = {}
+
+	local function hideDots(from: number)
+		for i = from, #dots do
+			dots[i].Visible = false
+		end
+	end
 
 	local function hideCursor()
 		ring.Visible = false
 		ghost.Visible = false
-		marker.Visible = false
+		hideDots(1)
 		RadiusPreview.label(nil)
 	end
 
@@ -293,48 +289,109 @@ return function (plugin: Plugin): () -> ()
 		}
 	end
 
-	local function pointModeAt(hit: Hit?, settings: Settings.State): boolean
-		local opened = if hit then hit.opened else nil
-
-		return opened ~= nil and Paint.isPointMode(opened, settings.radius)
-	end
-
-	-- The point(s) a stroke would move at `hit` in point mode, by the same rules as Paint.apply.
-	local function snapAt(models: { Model }, hit: Hit, mode: Paint.Effect, settings: Settings.State): Paint.Snap?
+	-- What the brush would move at `hit`, by the same rules as Paint.apply and the same tiles as
+	-- applyBrush: tiles near the cursor (found with a spatial query, so hovering opens only those,
+	-- never the whole place), without back faces.
+	local function previewAt(models: { Model }, hit: Hit, mode: Paint.Effect, settings: Settings.State): Paint.Preview?
 		local opened = hit.opened
 
-		if not opened or not Paint.isPointMode(opened, settings.radius) then
+		if not opened then
 			return nil
 		end
 
-		-- Peek rather than get so hovering does not open every tile in the place.
+		local hitFace = opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		local reach = math.max(settings.radius, Paint.gridSpacing(opened)) * 2
+		local filter: { Instance } = table.create(#models)
+
+		for i, model in models do
+			filter[i] = model
+		end
+
+		local params = OverlapParams.new()
+		params.FilterType = Enum.RaycastFilterType.Include
+		params.FilterDescendantsInstances = filter
+
 		local targets = { opened }
+		local seen: { [Model]: true } = { [opened.model] = true }
 
-		for _, model in models do
-			local other = Session.peek(model)
+		for _, part in workspace:GetPartBoundsInRadius(hit.position, reach, params) do
+			local model = Query.displacementOf(part)
 
-			if other and other ~= opened then
+			if not model or seen[model] then
+				continue
+			end
+
+			seen[model] = true
+
+			local other = Session.get(model)
+
+			if other and other.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(other.disp)):Dot(hitFace) >= BACK_FACE_DOT then
 				table.insert(targets, other)
 			end
 		end
 
-		return Paint.snap(targets, hit.position, brushFor(mode, settings), opened)
+		return Paint.preview(targets, hit.position, brushFor(mode, settings), MAX_DOTS, opened)
 	end
 
-	-- Where a snapped point is now (it may have risen since it was snapped).
-	local function livePosition(snap: Paint.Snap): Vector3?
-		local point = snap.points[1]
+	local function dotAt(i: number): SphereHandleAdornment
+		local existing = dots[i]
 
-		if not point then
-			return nil
+		if existing then
+			return existing
 		end
 
-		return point.opened.model:GetPivot() * Displacement.position(point.opened.disp, point.index)
+		local created = Instance.new("SphereHandleAdornment")
+		created.Name = "StrataBrushPoint"
+		created.Adornee = workspace.Terrain
+		created.AlwaysOnTop = true
+		created.ZIndex = 3
+		created.Parent = CoreGui
+		dots[i] = created
+
+		return created
 	end
 
-	-- `stationary`: the mouse ray has not moved since the last frame, so point mode keeps moving
-	-- the same point even as it rises and a neighbor comes to measure closer.
-	local function applyBrush(models: { Model }, hit: Hit, mode: Paint.Effect, dt: number, stationary: boolean)
+	-- Shows the points inside the brush, stronger points more solid. A large brush holding more
+	-- than MAX_DOTS points shows none (the ring already says it all). An empty brush shows the
+	-- nearest points faintly, so a small brush between points shows where to aim.
+	local function showPreview(preview: Paint.Preview?, mode: Paint.Effect)
+		if not preview or preview.more then
+			hideDots(1)
+			return
+		end
+
+		local camera = workspace.CurrentCamera
+		local eye = if camera then camera.CFrame.Position else nil
+		local color = MODE_COLORS[mode]
+		local used = 0
+
+		local function place(position: Vector3, transparency: number, scale: number)
+			used += 1
+
+			local distance = if eye then (eye - position).Magnitude else 50
+			local dot = dotAt(used)
+			dot.CFrame = CFrame.new(position)
+			-- Sized by camera distance rather than radius, so dots stay visible zoomed out without
+			-- dwarfing a 1-stud ring up close.
+			dot.Radius = math.clamp(distance * DOT_SCALE, DOT_MIN, DOT_MAX) * scale
+			dot.Color3 = color
+			dot.Transparency = transparency
+			dot.Visible = true
+		end
+
+		for _, point in preview.inside do
+			-- A point at the very rim barely moves, so it fades almost out rather than looking active.
+			place(point.position, 0.1 + (1 - point.weight) * 0.75, 1)
+		end
+
+		for _, position in preview.nearby do
+			place(position, 0.7, 0.8)
+		end
+
+		hideDots(used + 1)
+	end
+
+	local function applyBrush(models: { Model }, hit: Hit, mode: Paint.Effect, dt: number)
 		local settings = Settings.get()
 		local center = hit.position
 		-- Compare against the hit tile's base face normal rather than the sculpted triangle normal
@@ -344,9 +401,9 @@ return function (plugin: Plugin): () -> ()
 			then hitOpened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(hitOpened.disp))
 			else hit.normal
 		local brush = brushFor(mode, settings)
-		-- Gathering never shrinks with a small ring: point mode snaps up to about a grid step away,
-		-- and seam twins and Smooth's neighbors across a seam must stay included.
-		local grid = if hitOpened then Paint.pointThreshold(hitOpened) else 0
+		-- Gathering never shrinks below a grid step: Smooth reads neighbors about a grid step past a
+		-- small ring, including across a seam.
+		local grid = if hitOpened then Paint.gridSpacing(hitOpened) else 0
 		local reach = math.max(settings.radius, grid) * 2.5 + (if lastCenter then (center - lastCenter).Magnitude else 0)
 		local targets: { Opened } = {}
 
@@ -410,13 +467,7 @@ return function (plugin: Plugin): () -> ()
 
 		lastCenter = center
 
-		local changed, reachedRemoved, snap = Paint.apply(targets, centers, brush, dt, hitOpened, if stationary then heldSnap else nil)
-
-		if snap then
-			heldSnap = snap
-		elseif not stationary then
-			heldSnap = nil
-		end
+		local changed, reachedRemoved = Paint.apply(targets, centers, brush, dt)
 
 		if reachedRemoved then
 			strokeReachedRemoved = true
@@ -534,10 +585,7 @@ return function (plugin: Plugin): () -> ()
 			return
 		end
 
-		-- In point mode the marked point is what Raise To will set, so its height is the one picked.
-		local snap = snapAt(models, hit, "RaiseTo", settings)
-		local point = if snap then livePosition(snap) else nil
-		local height = math.round(Paint.heightAt(opened, point or hit.position, brushFor("RaiseTo", settings)) * 10) / 10
+		local height = math.round(Paint.heightAt(opened, hit.position, brushFor("RaiseTo", settings)) * 10) / 10
 
 		Settings.update(function (s)
 			s.height = height
@@ -589,7 +637,6 @@ return function (plugin: Plugin): () -> ()
 		end
 
 		lastCenter = nil
-		heldSnap = nil
 
 		-- Apply an immediate dab on mouse-down so quick clicks always take effect.
 		local models = Query.workingModels()
@@ -597,7 +644,7 @@ return function (plugin: Plugin): () -> ()
 
 		if hit then
 			lastHit = hit
-			applyBrush(models, hit, effectiveMode(settings.mode), TAP_DT, false)
+			applyBrush(models, hit, effectiveMode(settings.mode), TAP_DT)
 		end
 	end
 
@@ -640,7 +687,6 @@ return function (plugin: Plugin): () -> ()
 		table.clear(snapshots)
 		table.clear(snapshotList)
 		lastCenter = nil
-		heldSnap = nil
 
 		local reachedRemoved = strokeReachedRemoved
 		strokeReachedRemoved = false
@@ -663,8 +709,9 @@ return function (plugin: Plugin): () -> ()
 			ok, err = pcall(Edges.autosew, edited, strokePins)
 		end
 
-		-- Pinned part edges (Keep edges stitched) are put back every frame, so a stroke over only
-		-- pinned points, such as point mode on a stitched edge, ends where it started.
+		-- Pinned part edges (Keep edges stitched) are put back every frame, and live sewing puts
+		-- back a denser tile's 2:1 in-between points, so a stroke over only such points ends where
+		-- it started.
 		local netMoved = false
 
 		for _, opened in edited do
@@ -693,7 +740,8 @@ return function (plugin: Plugin): () -> ()
 			ChangeHistoryService:FinishRecording(current, Enum.FinishRecordingOperation.Cancel)
 			Session.clear()
 
-			if Settings.get().stitchParts then
+			-- Say so only when part edges were actually pinned in this stroke.
+			if next(strokePins) ~= nil then
 				Status.post("warning", PINNED_TEXT)
 			end
 
@@ -747,8 +795,9 @@ return function (plugin: Plugin): () -> ()
 		table.insert(connections, connection)
 	end
 
-	-- The ring is always the real radius. In point mode it dims so the marker leads the eye.
-	local function placeCursor(position: Vector3, normal: Vector3, settings: Settings.State, mode: Paint.Effect, pointMode: boolean)
+	-- The ring is always the real radius. It dims while it holds no point, since a stroke there
+	-- would move nothing.
+	local function placeCursor(position: Vector3, normal: Vector3, settings: Settings.State, mode: Paint.Effect, empty: boolean)
 		local up = if math.abs(normal.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
 		local frame = CFrame.lookAt(position + normal * 0.05, position + normal * 2, up)
 		local radius = settings.radius
@@ -765,30 +814,11 @@ return function (plugin: Plugin): () -> ()
 		end
 
 		-- Dim slightly while dragging so terrain stays clear.
-		ring.Transparency = if pointMode
-			then (if recording then 0.6 else 0.45)
-			elseif recording then 0.45
-			else 0.2
+		ring.Transparency = if empty then 0.6 elseif recording then 0.45 else 0.2
 	end
 
-	-- Shows the point mode marker on the point(s) of `snap` (where they are now), or hides it.
-	local function showMarker(snap: Paint.Snap?, mode: Paint.Effect)
-		local position = if snap then livePosition(snap) else nil
-
-		if not position then
-			marker.Visible = false
-			return
-		end
-
-		local camera = workspace.CurrentCamera
-		local distance = if camera then (camera.CFrame.Position - position).Magnitude else 50
-		marker.CFrame = CFrame.new(position)
-		-- Sized by camera distance rather than radius, so it stays visible zoomed out over a coarse
-		-- grid without dwarfing a 1-stud ring up close.
-		marker.Radius = math.clamp(distance * 0.008, 0.14, 0.45)
-		marker.Color3 = MODE_COLORS[mode]
-		marker.Transparency = if recording then 0.35 else 0.1
-		marker.Visible = true
+	local function isEmpty(preview: Paint.Preview?): boolean
+		return preview ~= nil and #preview.inside == 0 and not preview.more
 	end
 
 	table.insert(
@@ -801,14 +831,7 @@ return function (plugin: Plugin): () -> ()
 			end
 
 			local mode: Paint.Effect = effectiveMode(settings.mode)
-			keyStrip.show(if settings.showKeyHints then keyHints(mode, settings, pointModeAt(lastHit, settings)) else nil)
-
-			local ray = mouse.UnitRay
-			local previousRay = lastRay
-			local stationary = previousRay ~= nil
-				and (ray.Origin - previousRay.Origin).Magnitude < 1e-4
-				and (ray.Direction - previousRay.Direction).Magnitude < 1e-5
-			lastRay = ray
+			keyStrip.show(if settings.showKeyHints then keyHints(mode, settings) else nil)
 
 			local resizing = resize
 
@@ -829,10 +852,10 @@ return function (plugin: Plugin): () -> ()
 
 				if held then
 					local current = Settings.get()
-					local pointMode = pointModeAt(held, current)
-					placeCursor(held.position, displayNormal or held.normal, current, mode, pointMode)
-					showMarker(snapAt(resizeModels, held, mode, current), mode)
-					RadiusPreview.label(held.position, sizeText(current.radius, pointMode))
+					local preview = previewAt(resizeModels, held, mode, current)
+					placeCursor(held.position, displayNormal or held.normal, current, mode, isEmpty(preview))
+					showPreview(preview, mode)
+					RadiusPreview.label(held.position, sizeText(current.radius))
 				end
 
 				return
@@ -845,20 +868,18 @@ return function (plugin: Plugin): () -> ()
 			if RadiusPreview.active() and not recording then
 				local previewRay = RadiusPreview.ray()
 				local previewHit = if previewRay then findHit(models, previewRay) else nil
-				local text = `Radius {Format.studs(settings.radius)} st`
-
 				if previewHit then
-					local pointMode = pointModeAt(previewHit, settings)
-					placeCursor(previewHit.position, previewHit.normal, settings, mode, pointMode)
-					showMarker(snapAt(models, previewHit, mode, settings), mode)
-					RadiusPreview.label(previewHit.position, sizeText(settings.radius, pointMode))
+					local preview = previewAt(models, previewHit, mode, settings)
+					placeCursor(previewHit.position, previewHit.normal, settings, mode, isEmpty(preview))
+					showPreview(preview, mode)
+					RadiusPreview.label(previewHit.position, sizeText(settings.radius))
 				else
 					local position, facing = RadiusPreview.fallback(settings.radius)
-					marker.Visible = false
+					hideDots(1)
 
 					if position and facing then
 						placeCursor(position, facing, settings, mode, false)
-						RadiusPreview.label(position, text)
+						RadiusPreview.label(position, sizeText(settings.radius))
 					end
 				end
 
@@ -872,6 +893,13 @@ return function (plugin: Plugin): () -> ()
 			if not hit then
 				hideCursor()
 				lastHit = nil
+
+				-- Dragging off the terrain (over a hole or the sky) and back starts a new path rather
+				-- than painting a straight line across the gap.
+				if recording then
+					lastCenter = nil
+				end
+
 				return
 			end
 
@@ -887,7 +915,6 @@ return function (plugin: Plugin): () -> ()
 			end
 
 			displayNormal = shown.Unit
-			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, pointModeAt(hit, settings))
 
 			if recording then
 				local stepDt = math.min(dt, MAX_DT)
@@ -898,12 +925,13 @@ return function (plugin: Plugin): () -> ()
 					clampNext = false
 				end
 
-				applyBrush(models, hit, mode, stepDt, stationary)
+				applyBrush(models, hit, mode, stepDt)
 			end
 
-			-- During a stroke the marker follows the point being moved; otherwise the point a stroke
-			-- would move here.
-			showMarker(if recording then heldSnap else snapAt(models, hit, mode, settings), mode)
+			-- After this frame's paint, so the dots sit on the points where they are now.
+			local preview = previewAt(models, hit, mode, settings)
+			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, isEmpty(preview))
+			showPreview(preview, mode)
 		end)
 	)
 
@@ -919,7 +947,11 @@ return function (plugin: Plugin): () -> ()
 
 		ring:Destroy()
 		ghost:Destroy()
-		marker:Destroy()
+
+		for _, dot in dots do
+			dot:Destroy()
+		end
+
 		keyStrip.destroy()
 	end
 end
