@@ -12,7 +12,9 @@ local Rows = require(script.Parent.Parent.Rows)
 
 local e = React.createElement
 
-local function toggle(key: "autosew" | "stitchParts" | "autoBake" | "showKeyHints")
+type ToggleKey = "autosew" | "stitchParts" | "autoBake" | "showKeyHints" | "ribbonTools"
+
+local function toggle(key: ToggleKey)
 	return function()
 		Settings.update(function(s)
 			if key == "autosew" then
@@ -21,11 +23,30 @@ local function toggle(key: "autosew" | "stitchParts" | "autoBake" | "showKeyHint
 				s.stitchParts = not s.stitchParts
 			elseif key == "autoBake" then
 				s.autoBake = not s.autoBake
-			else
+			elseif key == "showKeyHints" then
 				s.showKeyHints = not s.showKeyHints
+			else
+				s.ribbonTools = not s.ribbonTools
 			end
 		end)
 	end
+end
+
+-- A 1 px divider with a bit of breathing room above it so categories read as separate groups.
+local function CategoryDivider(props: { LayoutOrder: number })
+	local theme = StudioComponents.useTheme()
+	return e("Frame", {
+		LayoutOrder = props.LayoutOrder,
+		Size = UDim2.new(1, 0, 0, 7),
+		BackgroundTransparency = 1,
+	}, {
+		Line = e("Frame", {
+			Position = UDim2.fromOffset(0, 4),
+			Size = UDim2.new(1, 0, 0, 1),
+			BorderSizePixel = 0,
+			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
+		}),
+	})
 end
 
 local function SettingsPage(props: { settings: Settings.State })
@@ -34,27 +55,30 @@ local function SettingsPage(props: { settings: Settings.State })
 		Header = Rows.header(1, "Settings", function()
 			Settings.setOverlay("none")
 		end, "**Close settings** (`Esc`)."),
+		HeaderDivider = Rows.divider(2),
 
-		EdgesHeading = Rows.section(2, "Edges"),
+		EdgesHeading = Rows.section(3, "Edges and stitching", true),
+		EdgesNote = Rows.paragraph(4, "Keep tile seams closed and edges snapped to nearby parts.", "dimmed"),
 		Autosew = Rows.checkbox(
-			3,
+			5,
 			"Auto-sew after edits",
 			settings.autosew,
 			toggle("autosew"),
-			"**Close seams automatically** after edits.\n\n"
-				.. "Sews edited tiles to neighbors after each paint stroke and `Detail` change."
+			"**Close tile seams automatically** after edits.\n\n"
+				.. "Welds edited tiles to neighboring tiles after each brush stroke and `Detail` change.\n\n"
+				.. "> Turn off to sculpt tiles apart, then use `Sew tiles` manually."
 		),
 		KeepStitched = Rows.checkbox(
-			4,
+			6,
 			"Keep edges stitched",
 			settings.stitchParts,
 			toggle("stitchParts"),
 			"**Lock tile edges** touching nearby parts.\n\n"
-				.. "Holds edges in place while painting, changing `Detail` or adding noise.\n\n"
+				.. "Holds edges against roads, curbs and walls while painting, changing `Detail` or adding noise.\n\n"
 				.. "> Turn off to sculpt freely next to parts."
 		),
 		Reach = Rows.property(
-			5,
+			7,
 			"Reach",
 			e(StudioComponents.NumericInput, {
 				Value = settings.stitchReach,
@@ -68,22 +92,25 @@ local function SettingsPage(props: { settings: Settings.State })
 					end)
 				end,
 			}),
-			"**Max snap distance** in studs.\n\n"
-				.. "Used by the `Stitch` tool and the tile page's `Stitch` button to snap tile edges to part edges.\n\n"
-				.. "> Example: 2 for roads and curbs, more for wider gaps."
+			"**Max stitch distance** in studs.\n\n"
+				.. "How far a tile edge may move to snap onto a part in the `Stitch` tool or tile `Stitch` button.\n\n"
+				.. "> Example: 2 for roads and curbs, higher for wider gaps."
 		),
 
-		BakingHeading = Rows.section(6, "Baking"),
+		BakingDivider = e(CategoryDivider, { LayoutOrder = 8 }),
+		BakingHeading = Rows.section(9, "Baking and shading", true),
+		BakingNote = Rows.paragraph(10, "Baked tiles merge into unions. Smoothing is their shading angle in degrees.", "dimmed"),
 		AutoBake = Rows.checkbox(
-			7,
+			11,
 			"Bake automatically",
 			settings.autoBake,
 			toggle("autoBake"),
-			"**Auto-bake tiles** into unions.\n\n"
-				.. "Runs when a tool stops, and after `Create` and edit actions."
+			"**Merge edited tiles** into unions automatically.\n\n"
+				.. "Runs when a tool stops, and after `Create` and edit actions. Baked textures run smoothly across triangles and tiles.\n\n"
+				.. "> Turn off to keep tiles as editable wedges until you click `Bake`."
 		),
 		Smoothing = Rows.property(
-			8,
+			12,
 			"Smoothing",
 			e(StudioComponents.NumericInput, {
 				Value = settings.smoothingAngle,
@@ -107,20 +134,30 @@ local function SettingsPage(props: { settings: Settings.State })
 					end)
 				end,
 			}),
-			"**Smooth shading angle** in degrees.\n\n"
-				.. "- **0**: sharp low-poly facets.\n"
+			"**Smooth shading angle** in degrees for baked unions.\n\n"
+				.. "- **0**: sharp, flat-shaded facets.\n"
 				.. "- **45 to 60**: smooth rolling hills.\n\n"
-				.. "> Applies to every baked tile in the place."
+				.. "> Applies right away to every baked tile in this place."
 		),
 
-		ViewportHeading = Rows.section(10, "Viewport"),
+		InterfaceDivider = e(CategoryDivider, { LayoutOrder = 13 }),
+		InterfaceHeading = Rows.section(14, "Interface", true),
 		KeyHints = Rows.checkbox(
-			11,
-			"Show key hints",
+			15,
+			"Show viewport key hints",
 			settings.showKeyHints,
 			toggle("showKeyHints"),
 			"**Show shortcut bar** in the 3D view.\n\n"
-				.. "Displayed at the bottom while a tool runs."
+				.. "Displays active keys along the bottom of the viewport while a tool runs."
+		),
+		RibbonTools = Rows.checkbox(
+			16,
+			"Tools on Plugins ribbon",
+			settings.ribbonTools,
+			toggle("ribbonTools"),
+			"**Add tool buttons** to Studio's `Plugins` ribbon tab.\n\n"
+				.. "Adds a `Strata Tools` group with all 7 tools. The `Strata` panel button is always shown.\n\n"
+				.. "> Off by default: the panel's tool strip already has every tool."
 		),
 	})
 end
