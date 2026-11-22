@@ -143,8 +143,8 @@ end
 
 -- Splits each selected displacement into 2x2 displacements one power lower, losslessly (see
 -- Displacement.split). Quarters go into the displacement's TerrainArea, or a new one in its
--- place, and become the selection. Returns how many were split and how many were skipped for
--- being power 2.
+-- place, and become the selection. Quarters whose every triangle is deleted are left out.
+-- Returns how many were split and how many were skipped for being power 2.
 function Shape.split(): (number, number)
 	local splittable: { Opened } = {}
 	local skipped = 0
@@ -178,6 +178,10 @@ function Shape.split(): (number, number)
 				container = area
 			end
 			for _, quarter in Displacement.split(opened.disp) do
+				-- A quarter with every triangle deleted would be an invisible tile.
+				if Displacement.holeCount(quarter.disp) == Displacement.triangleCount(quarter.disp) then
+					continue
+				end
 				local child = TerrainInstance.create(
 					quarter.disp,
 					pivot * CFrame.new(quarter.center),

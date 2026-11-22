@@ -100,11 +100,22 @@ end
 -- Returns whether the wedges had to be built first.
 function Session.updateWedges(opened: Opened, changed: { [number]: true }): boolean
 	local rebuilt = TerrainInstance.ensureWedges(opened)
+	-- Removed points follow the surface the kept points show.
+	Displacement.reproject(opened.disp)
 	local triangles = Displacement.trianglesTouching(opened.disp, changed)
 	local positions = WedgeBuilder.updateTriangles(opened.disp, opened.wedges, opened.model:GetPivot(), triangles)
 	TerrainInstance.refreshBounds(opened, positions)
 	dirty[opened.model] = true
 	return rebuilt
+end
+
+-- Rebuilds every wedge after points were removed or restored (the triangles themselves
+-- changed), bringing wedges back first if the displacement was baked.
+function Session.updateTopology(opened: Opened)
+	TerrainInstance.ensureWedges(opened)
+	WedgeBuilder.rebuild(opened.disp, opened.wedges, opened.model:GetPivot())
+	TerrainInstance.refreshBounds(opened)
+	dirty[opened.model] = true
 end
 
 -- Shows new painted looks on the wedges of `triangles` (bringing wedges back first if the

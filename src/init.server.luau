@@ -10,6 +10,9 @@ local Settings = require(script.State.Settings)
 local startActivation = require(script.Viewport.Activation)
 local startBrushTool = require(script.Viewport.BrushTool)
 local startMaterialTool = require(script.Viewport.MaterialTool)
+local startMeshTool = require(script.Viewport.MeshTool)
+local Input = require(script.Viewport.Input)
+local RadiusPreview = require(script.Viewport.RadiusPreview)
 local startSampleTool = require(script.Viewport.SampleTool)
 local startStitchTool = require(script.Viewport.StitchTool)
 local startToolbar = require(script.Viewport.Toolbar)
@@ -108,6 +111,15 @@ local function restoreSettings()
 		if typeof(saved.paintFine) == "boolean" then
 			s.paintFine = saved.paintFine
 		end
+		if typeof(saved.simplifyAngle) == "number" then
+			s.simplifyAngle = saved.simplifyAngle
+		end
+		if saved.meshMode == "Simplify" or saved.meshMode == "Holes" then
+			s.meshMode = saved.meshMode
+		end
+		if typeof(saved.ribbonTools) == "boolean" then
+			s.ribbonTools = saved.ribbonTools
+		end
 	end)
 end
 
@@ -137,6 +149,9 @@ local function saveSettings()
 		paintColor = s.paintColor:ToHex(),
 		paintVariant = s.paintVariant,
 		paintFine = s.paintFine,
+		ribbonTools = s.ribbonTools,
+		simplifyAngle = s.simplifyAngle,
+		meshMode = s.meshMode,
 	})
 end
 
@@ -146,7 +161,7 @@ local widget = plugin:CreateDockWidgetPluginGuiAsync(
 	"StrataPanel",
 	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 280, 360, 220, 200)
 )
-widget.Name = "Strata"
+widget.Name = "StrataPanel"
 widget.Title = "Strata"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
@@ -164,6 +179,11 @@ local stopSession = Session.start()
 local stopActivation = startActivation(plugin)
 local stopBrushTool = startBrushTool(plugin)
 local stopMaterialTool = startMaterialTool(plugin)
+local stopMeshTool = startMeshTool(plugin)
+local stopRadiusPreview = RadiusPreview.start(plugin)
+local stopInput = Input.start(widget, function()
+	return Settings.activeTool(Settings.get()) ~= nil
+end)
 local stopPickFaceTool = PickFaceTool.start(plugin)
 local stopStitchTool = startStitchTool(plugin)
 local stopSampleTool = startSampleTool(plugin)
@@ -182,6 +202,9 @@ plugin.Unloading:Connect(function()
 	root:unmount()
 	stopBrushTool()
 	stopMaterialTool()
+	stopMeshTool()
+	stopRadiusPreview()
+	stopInput()
 	stopPickFaceTool()
 	stopStitchTool()
 	stopSampleTool()

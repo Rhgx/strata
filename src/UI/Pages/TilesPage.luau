@@ -12,6 +12,7 @@ local Edges = require(script.Parent.Parent.Parent.Actions.Edges)
 local Shape = require(script.Parent.Parent.Parent.Actions.Shape)
 local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
 local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
+local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
 local ColorField = require(script.Parent.Parent.ColorField)
 local Format = require(script.Parent.Parent.Format)
 local Icons = require(script.Parent.Parent.Icons)
@@ -199,6 +200,61 @@ local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 	})
 end
 
+-- Clear paint, Restore holes and Restore points: whichever apply. One gets the full width with a
+-- longer label; several share the grid with short ones.
+local function cleanupRow(layoutOrder: number, info: Query.SelectionInfo)
+	local function clearPaint()
+		run(function()
+			local count = Appearance.clearPaint()
+			Status.post("success", `Cleared painted materials from {Format.plural(count, "tile")}.`)
+		end)
+	end
+	local function restoreHoles()
+		run(function()
+			local count = Appearance.restoreHoles()
+			Status.post("success", `Restored deleted triangles on {Format.plural(count, "tile")}.`)
+		end)
+	end
+	local clearTip = "**Remove painted materials** from the selected tiles.\n\n"
+		.. "Painted areas go back to each tile's own look. Holes stay.\n\n"
+		.. "> Paint with the `Material` tool in the strip."
+	local function restorePoints()
+		run(function()
+			local count = MeshActions.restorePoints()
+			Status.post("success", `Restored removed points on {Format.plural(count, "tile")}.`)
+		end)
+	end
+	local restoreTip = "**Bring back deleted triangles** on the selected tiles.\n\n"
+		.. "They come back in each tile's own look.\n\n"
+		.. "> Cut holes with the `Mesh` tool's `Cut holes` mode."
+	local pointsTip = "**Bring back removed points** on the selected tiles.\n\n"
+		.. "The full grid of triangles returns, on the surface as it is now.\n\n"
+		.. "> Remove points with the `Mesh` tool's `Simplify` mode."
+
+	type Action = { short: string, long: string, icon: Icons.Icon, run: () -> (), tip: string }
+	local actions: { Action } = {}
+	if info.painted > 0 then
+		table.insert(actions, { short = "Clear paint", long = "Clear painted materials", icon = Icons.ClearPaint, run = clearPaint, tip = clearTip })
+	end
+	if info.holes > 0 then
+		table.insert(actions, { short = "Restore holes", long = "Restore deleted triangles", icon = Icons.RestoreHoles, run = restoreHoles, tip = restoreTip })
+	end
+	if info.simplified > 0 then
+		table.insert(actions, { short = "Restore points", long = "Restore removed points", icon = Icons.RestorePoints, run = restorePoints, tip = pointsTip })
+	end
+	if #actions == 0 then
+		return nil
+	elseif #actions == 1 then
+		local only = actions[1]
+		return Rows.button(layoutOrder, only.long, only.run, only.tip, nil, only.icon)
+	end
+	local cells: { [string]: unknown } = {}
+	for i, action in actions do
+		cells[action.short] = actionButton(i, action.short, action.icon, false, action.run, action.tip)
+	end
+	return Rows.grid(layoutOrder, 2, cells)
+end
+
 local function TilesPage(props: { settings: Settings.State, info: Query.SelectionInfo })
 	local settings = props.settings
 	local info = props.info
@@ -284,24 +340,8 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			end,
 		}),
 
-		-- Only when a selected tile has painted materials.
-		ClearPaint = if info.painted > 0
-			then Rows.button(
-				6,
-				"Clear painted materials",
-				function()
-					run(function()
-						local count = Appearance.clearPaint()
-						Status.post("success", `Cleared painted materials from {Format.plural(count, "tile")}.`)
-					end)
-				end,
-				"**Remove painted materials** from the selected tiles.\n\n"
-					.. "Painted areas go back to each tile's own look.\n\n"
-					.. "> Paint with the `Material` tool in the strip.",
-				nil,
-				Icons.ClearPaint
-			)
-			else nil,
+		-- Only when a selected tile has painted materials or deleted triangles.
+		Cleanup = cleanupRow(6, info),
 		ActionsHeading = Rows.section(7, "Actions"),
 		Actions = Rows.grid(8, 2, {
 			Round = actionButton(1, "Round folds", Icons.RoundFolds, info.count < 2, function()

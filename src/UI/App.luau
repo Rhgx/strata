@@ -24,6 +24,7 @@ local BrushPage = require(Pages.BrushPage)
 local CreatePage = require(Pages.CreatePage)
 local HelpPage = require(Pages.HelpPage)
 local MaterialPage = require(Pages.MaterialPage)
+local MeshPage = require(Pages.MeshPage)
 local OverviewPage = require(Pages.OverviewPage)
 local SettingsPage = require(Pages.SettingsPage)
 local StitchPage = require(Pages.StitchPage)
@@ -34,7 +35,7 @@ local e = React.createElement
 local STATUS_HEIGHT = 24
 local STRIP_HEIGHT = 30
 
-type Page = "settings" | "help" | "brush" | "material" | "pick" | "stitch" | "tiles" | "parts" | "overview"
+type Page = "settings" | "help" | "brush" | "material" | "mesh" | "pick" | "stitch" | "tiles" | "parts" | "overview"
 
 type Context = {
 	page: Page,
@@ -56,6 +57,8 @@ local function context(settings: Settings.State): Context
 		page = "brush"
 	elseif settings.coloring then
 		page = "material"
+	elseif settings.meshing then
+		page = "mesh"
 	elseif settings.picking then
 		page = "pick"
 	elseif settings.stitching then
@@ -93,6 +96,13 @@ local function idleText(settings: Settings.State, ctx: Context): string
 			return "Select tiles to paint."
 		end
 		return "Painting materials. Ctrl erases."
+	elseif page == "mesh" then
+		if not hasTiles then
+			return "No terrain yet."
+		elseif settings.paintSelectedOnly and ctx.info.count == 0 then
+			return "Select tiles to edit."
+		end
+		return if settings.meshMode == "Holes" then "Cutting holes. Ctrl restores." else "Removing points. Ctrl restores."
 	elseif page == "pick" then
 		return "Pick faces, then Create."
 	elseif page == "stitch" then
@@ -122,6 +132,8 @@ local function body(settings: Settings.State, ctx: Context)
 		return e(BrushPage, { settings = settings })
 	elseif page == "material" then
 		return e(MaterialPage, { settings = settings })
+	elseif page == "mesh" then
+		return e(MeshPage, { settings = settings })
 	elseif page == "pick" then
 		return e(CreatePage, { settings = settings, picking = true })
 	elseif page == "stitch" then

@@ -89,8 +89,28 @@ local function hitsBox(origin: Vector3, direction: Vector3, length: number, min:
 	return near ~= nil
 end
 
--- The nearest triangle hit along the ray across `snapshots`, or nil.
-function SurfaceRay.cast(origin: Vector3, direction: Vector3, length: number, snapshots: { Snapshot }): Hit?
+-- Whether the ray passes near the tile's cached bounds, a cheap test before taking a snapshot.
+function SurfaceRay.mayHit(opened: Opened, origin: Vector3, direction: Vector3, length: number): boolean
+	local pivot = opened.model:GetPivot()
+	local pad = Vector3.one * 0.5
+	return hitsBox(
+		pivot:PointToObjectSpace(origin),
+		pivot:VectorToObjectSpace(direction),
+		length,
+		opened.boundsMin - pad,
+		opened.boundsMax + pad
+	)
+end
+
+-- The nearest triangle hit along the ray across `snapshots`, or nil. Deleted triangles are
+-- looked through, like the live surface, unless `includeHoles` is set (to restore them).
+function SurfaceRay.cast(
+	origin: Vector3,
+	direction: Vector3,
+	length: number,
+	snapshots: { Snapshot },
+	includeHoles: boolean?
+): Hit?
 	local best: Hit? = nil
 	local bestDistance = length
 	for _, snapshot in snapshots do
@@ -100,6 +120,9 @@ function SurfaceRay.cast(origin: Vector3, direction: Vector3, length: number, sn
 		local disp = snapshot.opened.disp
 		local world = snapshot.world
 		for t = 1, Displacement.triangleCount(disp) do
+			if not includeHoles and disp.triLooks[t] == Displacement.HOLE then
+				continue
+			end
 			local i1, i2, i3 = Displacement.triangle(disp, t)
 			local p1, p2, p3 = world[i1], world[i2], world[i3]
 			-- Moller-Trumbore, two-sided.

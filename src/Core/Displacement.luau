@@ -17,7 +17,7 @@
 
 	Painted materials (a Strata addition, see the Material tool) are stored per triangle: each
 	triangle shows look 0 (the tile's own material, color and variant) or one of the painted looks
-	in `looks`. Hammer instead blends two textures by a per-vertex alpha; Roblox parts cannot blend
+	in `looks`, or is a hole (deleted: not shown or baked, while its vertices stay). Hammer instead blends two textures by a per-vertex alpha; Roblox parts cannot blend
 	textures, and a triangle is the smallest piece a tile can show, so `alphas` stays unused.
 
 	Corner order follows Source's surface points: rows walk from corners[1] to corners[2] (and
@@ -27,6 +27,8 @@
 ]]
 
 local HttpService = game:GetService("HttpService")
+
+local Mesh = require(script.Parent.Mesh)
 
 local Displacement = {}
 
@@ -57,13 +59,23 @@ export type Displacement = {
 	materialVariant: string,
 	-- Painted looks; triangle look k (1 or more) is looks[k].
 	looks: { Look },
-	-- Per triangle: 0 for the tile's own look, otherwise an index into `looks`.
+	-- Per grid triangle: 0 for the tile's own look, HOLE for a deleted triangle, otherwise an
+	-- index into `looks`.
 	triLooks: { number },
+	-- Grid points taken out by the Mesh tool's Simplify mode (never the 4 corners). Their data
+	-- stays, so restoring one is lossless.
+	removed: { [number]: true },
+	-- The triangles shown while points are removed, built on demand (see `mesh`).
+	meshCache: Mesh.Mesh?,
 }
 
 -- How many painted looks one tile can hold (one character each in the saved data).
 Displacement.MAX_LOOKS = 35
+-- A deleted triangle: not shown and not baked. Its vertices stay, so sewing, stitching and the
+-- sculpt brushes work as before and restoring it brings back the same shape.
+Displacement.HOLE = -1
 local LOOK_DIGITS = "0123456789abcdefghijklmnopqrstuvwxyz"
+local HOLE_DIGIT = "-"
 
 -- Bump when saved data changes in a way old loaders cannot read (none yet: pre-release data is
 -- converted by hand instead of kept loadable).
@@ -113,6 +125,8 @@ function Displacement.new(corners: { Vector3 }, power: number, material: Enum.Ma
 		materialVariant = "",
 		looks = {},
 		triLooks = table.create((size - 1) * (size - 1) * 2, 0),
+		removed = {},
+		meshCache = nil,
 	}
 end
 
@@ -212,18 +226,25 @@ function Displacement.setFieldVector(disp: Displacement, index: number, vector: 
 	disp.normals[index], disp.distances[index] = Displacement.normalizeWithLength(vector)
 end
 
-function Displacement.triangleCount(disp: Displacement): number
+--[[
+	Two numberings of triangles. Grid triangles are Hammer's fixed checkerboard; painted looks and
+	holes are stored per grid triangle. Shown triangles are what the tile displays: the grid
+	triangles while no point is removed, otherwise the Mesh triangulation of the kept points.
+	Wedges, baking, raycasts and brush updates use shown triangles.
+]]
+
+function Displacement.gridTriangleCount(disp: Displacement): number
 	local quads = disp.size - 1
 	return quads * quads * 2
 end
 
 --[[
-	Returns the 3 vertex indices of triangle `t` (1-based). Each grid quad holds triangles
+	Returns the 3 vertex indices of grid triangle `t` (1-based). Each grid quad holds triangles
 	2q + 1 and 2q + 2. The split diagonal alternates in a checkerboard (the diamond pattern);
 	parity, diagonal and vertex order match CCoreDispInfo::BuildTriBLtoTR / BuildTriTLtoBR in
 	the Source SDK (even quads split 00-11, odd quads split 01-10).
 ]]
-function Displacement.triangle(disp: Displacement, t: number): (number, number, number)
+function Displacement.gridTriangle(disp: Displacement, t: number): (number, number, number)
 	local quadsPerSide = disp.size - 1
 	local q = (t - 1) // 2
 	local row = q // quadsPerSide
@@ -247,8 +268,141 @@ function Displacement.triangle(disp: Displacement, t: number): (number, number, 
 	return v01, v10, v11
 end
 
--- Every triangle that uses at least one of the given vertices.
+-- Removed points ----------------------------------------------------------------------------------
+
+function Displacement.isCorner(disp: Displacement, index: number): boolean
+	local n = disp.size - 1
+	return index == 1 or index == n + 1 or index == n * disp.size + 1 or index == n * disp.size + n + 1
+end
+
+function Displacement.isRemoved(disp: Displacement, index: number): boolean
+	return disp.removed[index] == true
+end
+
+function Displacement.removedCount(disp: Displacement): number
+	local count = 0
+	for _ in disp.removed do
+		count += 1
+	end
+	return count
+end
+
+-- Removes or restores a point. Corners cannot be removed. Returns whether anything changed.
+function Displacement.setRemoved(disp: Displacement, index: number, removed: boolean): boolean
+	if removed == (disp.removed[index] == true) or (removed and Displacement.isCorner(disp, index)) then
+		return false
+	end
+	if removed then
+		disp.removed[index] = true
+	else
+		disp.removed[index] = nil
+	end
+	disp.meshCache = nil
+	return true
+end
+
+-- The shown triangulation while points are removed, or nil when the grid is whole.
+function Displacement.mesh(disp: Displacement): Mesh.Mesh?
+	if next(disp.removed) == nil then
+		return nil
+	end
+	local cached = disp.meshCache
+	if cached then
+		return cached
+	end
+	local c = disp.corners
+	local n = disp.size - 1
+	local built = Mesh.build(disp.size, disp.removed, (c[2] - c[1]).Magnitude / n, (c[4] - c[1]).Magnitude / n)
+	disp.meshCache = built
+	return built
+end
+
+--[[
+	Puts every removed point back on the surface the kept points show, so it never holds a stale
+	height: a point restored after sculpting lands on the new surface instead of leaving a spike,
+	and smoothing reads the surface as shown. Returns the points that moved.
+]]
+function Displacement.reproject(disp: Displacement, faceNormal: Vector3?): { [number]: true }
+	local moved: { [number]: true } = {}
+	local mesh = Displacement.mesh(disp)
+	if not mesh then
+		return moved
+	end
+	local up = faceNormal or computeFaceNormal(disp.corners)
+	for v, on in mesh.removedOn do
+		local tri = mesh.triangles[on.triangle]
+		local target = Displacement.position(disp, tri[1], up) * on.w1
+			+ Displacement.position(disp, tri[2], up) * on.w2
+			+ Displacement.position(disp, tri[3], up) * on.w3
+		if (Displacement.position(disp, v, up) - target).Magnitude > 1e-5 then
+			Displacement.setPosition(disp, v, target, up)
+			moved[v] = true
+		end
+	end
+	return moved
+end
+
+-- Shown triangles -----------------------------------------------------------------------------
+
+function Displacement.triangleCount(disp: Displacement): number
+	local mesh = Displacement.mesh(disp)
+	return if mesh then #mesh.triangles else Displacement.gridTriangleCount(disp)
+end
+
+-- The 3 vertex indices of shown triangle `t`.
+function Displacement.triangle(disp: Displacement, t: number): (number, number, number)
+	local mesh = Displacement.mesh(disp)
+	if mesh then
+		local tri = mesh.triangles[t]
+		return tri[1], tri[2], tri[3]
+	end
+	return Displacement.gridTriangle(disp, t)
+end
+
+-- The grid triangle under the center of shown triangle `t`.
+local function gridUnderCenter(disp: Displacement, tri: { number }): number
+	local size = disp.size
+	local row = ((tri[1] - 1) // size + (tri[2] - 1) // size + (tri[3] - 1) // size) / 3
+	local col = ((tri[1] - 1) % size + (tri[2] - 1) % size + (tri[3] - 1) % size) / 3
+	return Displacement.triangleAt(disp, row, col)
+end
+
+-- The grid triangles a shown triangle stands for: the ones whose centers it covers, or the one
+-- under its own center when it covers none (a thin triangle between grid centers).
+function Displacement.coverOf(disp: Displacement, t: number): { number }
+	local mesh = Displacement.mesh(disp)
+	if not mesh then
+		return { t }
+	end
+	local cover = mesh.cover[t]
+	return if #cover > 0 then cover else { gridUnderCenter(disp, mesh.triangles[t]) }
+end
+
+-- The shown triangle covering the center of grid triangle `g`.
+function Displacement.shownOf(disp: Displacement, g: number): number
+	local mesh = Displacement.mesh(disp)
+	return if mesh then mesh.shownOf[g] else g
+end
+
+-- Every shown triangle that uses at least one of the given vertices.
 function Displacement.trianglesTouching(disp: Displacement, vertices: { [number]: true }): { number }
+	local mesh = Displacement.mesh(disp)
+	if mesh then
+		local seen: { [number]: true } = {}
+		local result = {}
+		for index in vertices do
+			local touching = mesh.vertexTriangles[index]
+			if touching then
+				for _, t in touching do
+					if not seen[t] then
+						seen[t] = true
+						table.insert(result, t)
+					end
+				end
+			end
+		end
+		return result
+	end
 	local size = disp.size
 	local quadsPerSide = size - 1
 	local seen: { [number]: true } = {}
@@ -272,9 +426,9 @@ function Displacement.trianglesTouching(disp: Displacement, vertices: { [number]
 end
 
 --[[
-	The triangle covering a point given in grid units: `row` from 0 to size - 1 along the rows
-	(corner 1 to corner 2) and `col` likewise along the columns. Follows the checkerboard split
-	of Displacement.triangle.
+	The grid triangle covering a point given in grid units: `row` from 0 to size - 1 along the
+	rows (corner 1 to corner 2) and `col` likewise along the columns. Follows the checkerboard
+	split of Displacement.gridTriangle.
 ]]
 function Displacement.triangleAt(disp: Displacement, row: number, col: number): number
 	local quadsPerSide = disp.size - 1
@@ -311,13 +465,59 @@ function Displacement.baseLook(disp: Displacement): Look
 	return { material = disp.material, color = disp.color, variant = disp.materialVariant }
 end
 
--- The look triangle `t` shows.
+--[[
+	The look index shown triangle `t` displays. While points are removed a shown triangle stands
+	for several grid triangles and shows the look most of them have (a tie favors ground over a
+	hole, then the lower look number), or, when it covers no grid triangle's center, the look of
+	the grid triangle under its own center.
+]]
+function Displacement.shownLookIndex(disp: Displacement, t: number): number
+	local mesh = Displacement.mesh(disp)
+	if not mesh then
+		return disp.triLooks[t]
+	end
+	local cover = mesh.cover[t]
+	if #cover == 0 then
+		return disp.triLooks[gridUnderCenter(disp, mesh.triangles[t])]
+	end
+	local counts: { [number]: number } = {}
+	for _, g in cover do
+		local index = disp.triLooks[g]
+		counts[index] = (counts[index] or 0) + 1
+	end
+	local best, bestCount = 0, -1
+	for index, count in counts do
+		local better = count > bestCount
+			or (count == bestCount and (best == Displacement.HOLE or (index ~= Displacement.HOLE and index < best)))
+		if better then
+			best, bestCount = index, count
+		end
+	end
+	return best
+end
+
+-- The look shown triangle `t` displays (the tile's own look for a hole, which shows nothing).
 function Displacement.lookOf(disp: Displacement, t: number): Look
-	local index = disp.triLooks[t]
-	if index and index > 0 then
+	local index = Displacement.shownLookIndex(disp, t)
+	if index > 0 then
 		return disp.looks[index]
 	end
 	return Displacement.baseLook(disp)
+end
+
+-- Whether shown triangle `t` is a hole.
+function Displacement.isHole(disp: Displacement, t: number): boolean
+	return Displacement.shownLookIndex(disp, t) == Displacement.HOLE
+end
+
+function Displacement.holeCount(disp: Displacement): number
+	local count = 0
+	for _, index in disp.triLooks do
+		if index == Displacement.HOLE then
+			count += 1
+		end
+	end
+	return count
 end
 
 -- The index `look` has on this tile (0 for the tile's own look), adding it when it is new.
@@ -338,18 +538,20 @@ function Displacement.lookIndex(disp: Displacement, look: Look): number?
 	return #disp.looks
 end
 
+-- Whether any triangle shows a painted look (holes do not count).
 function Displacement.isPainted(disp: Displacement): boolean
 	for _, index in disp.triLooks do
-		if index ~= 0 then
+		if index > 0 then
 			return true
 		end
 	end
 	return false
 end
 
--- How many different looks the tile shows (its own look counts once if any triangle uses it).
+-- How many different looks the tile shows (its own look counts once if any triangle uses it;
+-- holes show nothing).
 function Displacement.lookCount(disp: Displacement): number
-	local used: { [number]: true } = {}
+	local used: { [number]: true } = { [Displacement.HOLE] = true }
 	local count = 0
 	for _, index in disp.triLooks do
 		if not used[index] then
@@ -362,7 +564,7 @@ end
 
 -- Drops painted looks no triangle uses and renumbers the rest in order of first use.
 function Displacement.compactLooks(disp: Displacement)
-	local remap: { [number]: number } = { [0] = 0 }
+	local remap: { [number]: number } = { [0] = 0, [Displacement.HOLE] = Displacement.HOLE }
 	local looks: { Look } = {}
 	for t, index in disp.triLooks do
 		local mapped = remap[index]
@@ -511,23 +713,82 @@ local function withPower(disp: Displacement, power: number): Displacement
 		materialVariant = disp.materialVariant,
 		looks = table.clone(disp.looks),
 		triLooks = disp.triLooks,
+		removed = {},
+		meshCache = nil,
 	}
 end
 
--- Painted looks for `result` (a different power): each new triangle takes the look of the old
--- triangle under its center, at the same spot on the flat face.
+--[[
+	Removed points for `result` (one power up or down). Going up, the old points keep their state
+	and a new point between them is removed when any old point it sits between is, so simplified
+	areas stay simplified while the rest doubles. Going down, a point stays removed when its finer
+	twin was. Corners are never removed.
+]]
+local function resampleRemoved(old: Displacement, result: Displacement): { [number]: true }
+	local removed: { [number]: true } = {}
+	if next(old.removed) == nil then
+		return removed
+	end
+	local oldSize, size = old.size, result.size
+	for row = 0, size - 1 do
+		for col = 0, size - 1 do
+			local v = row * size + col + 1
+			if Displacement.isCorner(result, v) then
+				continue
+			end
+			local isRemoved = false
+			if size > oldSize then
+				-- Old points around this one (itself when it lines up with one).
+				local r0, r1 = row // 2, (row + 1) // 2
+				local c0, c1 = col // 2, (col + 1) // 2
+				for r = r0, r1 do
+					for c = c0, c1 do
+						if old.removed[r * oldSize + c + 1] then
+							isRemoved = true
+						end
+					end
+				end
+			else
+				isRemoved = old.removed[(row * 2) * oldSize + col * 2 + 1] == true
+			end
+			if isRemoved then
+				removed[v] = true
+			end
+		end
+	end
+	return removed
+end
+
+-- Painted looks and holes for `result` (a different power): each new triangle takes the look of
+-- the old triangle under its center, at the same spot on the flat face.
 local function resampleLooks(old: Displacement, result: Displacement): { number }
-	local count = Displacement.triangleCount(result)
-	if not Displacement.isPainted(old) then
+	local count = Displacement.gridTriangleCount(result)
+	if not Displacement.isPainted(old) and Displacement.holeCount(old) == 0 then
 		return table.create(count, 0)
 	end
 	local scale = (old.size - 1) / (result.size - 1)
+	local coarser = result.size < old.size
 	local looks = table.create(count, 0)
 	for t = 1, count do
-		local i1, i2, i3 = Displacement.triangle(result, t)
-		local row = ((i1 - 1) // result.size + (i2 - 1) // result.size + (i3 - 1) // result.size) / 3
-		local col = ((i1 - 1) % result.size + (i2 - 1) % result.size + (i3 - 1) % result.size) / 3
-		looks[t] = old.triLooks[Displacement.triangleAt(old, row * scale, col * scale)]
+		local i1, i2, i3 = Displacement.gridTriangle(result, t)
+		local rows = { (i1 - 1) // result.size, (i2 - 1) // result.size, (i3 - 1) // result.size }
+		local cols = { (i1 - 1) % result.size, (i2 - 1) % result.size, (i3 - 1) % result.size }
+		local row = (rows[1] + rows[2] + rows[3]) / 3
+		local col = (cols[1] + cols[2] + cols[3]) / 3
+		local index = old.triLooks[Displacement.triangleAt(old, row * scale, col * scale)]
+		-- A coarser triangle covers several old ones: when its center falls in a hole, it stays
+		-- solid if any of them is, so thin paths of ground are not lost.
+		if coarser and index == Displacement.HOLE then
+			for k = 1, 3 do
+				local r, c = (row + rows[k]) / 2, (col + cols[k]) / 2
+				local other = old.triLooks[Displacement.triangleAt(old, r * scale, c * scale)]
+				if other ~= Displacement.HOLE then
+					index = other
+					break
+				end
+			end
+		end
+		looks[t] = index
 	end
 	return looks
 end
@@ -541,6 +802,7 @@ local function powerUp(disp: Displacement): Displacement
 	result.offsetNormals = upsample(disp.offsetNormals, size, averageVectors)
 	result.alphas = upsample(disp.alphas, size, averageNumbers)
 	result.triLooks = resampleLooks(disp, result)
+	result.removed = resampleRemoved(disp, result)
 	return result
 end
 
@@ -555,6 +817,7 @@ local function powerDown(disp: Displacement): Displacement
 	result.offsetNormals = downsample(disp.offsetNormals, size, addVectors, scaleVector)
 	result.alphas = downsample(disp.alphas, size, addNumbers, scaleNumber)
 	result.triLooks = resampleLooks(disp, result)
+	result.removed = resampleRemoved(disp, result)
 	return result
 end
 
@@ -565,6 +828,10 @@ function Displacement.changePower(disp: Displacement, power: number): Displaceme
 		error(`displacement power must be 2, 3 or 4 (got {power})`)
 	end
 	local result = disp
+	if result.power ~= power then
+		-- Removed points carry the shown surface into the new grid.
+		Displacement.reproject(disp)
+	end
 	while result.power < power do
 		result = powerUp(result)
 	end
@@ -594,6 +861,8 @@ function Displacement.split(disp: Displacement): { Quarter }
 	if disp.power < 3 then
 		error("only power 3 and 4 displacements can be split")
 	end
+	-- Removed points that become quarter corners come back where the surface shows them.
+	Displacement.reproject(disp)
 	local half = (disp.size - 1) // 2
 	local childSize = half + 1
 	local c = disp.corners
@@ -624,10 +893,14 @@ function Displacement.split(disp: Displacement): { Quarter }
 					child.offsets[target] = disp.offsets[source]
 					child.offsetNormals[target] = disp.offsetNormals[source]
 					child.alphas[target] = disp.alphas[source]
+					-- Removed points stay removed, except where they become a quarter's corner.
+					if disp.removed[source] and not Displacement.isCorner(child, target) then
+						child.removed[target] = true
+					end
 				end
 			end
 			-- Each quarter quad lines up with one parent quad (same checkerboard split), so
-			-- painted looks copy triangle for triangle.
+			-- painted looks and holes copy triangle for triangle.
 			child.looks = table.clone(disp.looks)
 			for r = 0, half - 1 do
 				for col = 0, half - 1 do
@@ -763,13 +1036,14 @@ end
 
 --[[
 	Painted looks: "Looks" holds the palette as JSON (material name, hex color, variant) and
-	"TriLooks" one character per triangle (0 for the tile's own look, then 1 to 9 and a to z).
-	Both are left out on unpainted tiles. Unused looks are dropped first, so painted unions,
+	"TriLooks" one character per triangle (0 for the tile's own look, then 1 to 9 and a to z,
+	and "-" for a deleted triangle). Both are left out on tiles with no paint and no holes
+	(holes alone save an empty palette). Unused looks are dropped first, so painted unions,
 	named after their look number when baked, always match the saved palette.
 ]]
 local function saveLooks(disp: Displacement, config: Configuration)
 	Displacement.compactLooks(disp)
-	if #disp.looks == 0 then
+	if #disp.looks == 0 and Displacement.holeCount(disp) == 0 then
 		config:SetAttribute("Looks", nil)
 		config:SetAttribute("TriLooks", nil)
 		return
@@ -780,7 +1054,7 @@ local function saveLooks(disp: Displacement, config: Configuration)
 	end
 	local digits = table.create(#disp.triLooks)
 	for t, index in disp.triLooks do
-		digits[t] = string.sub(LOOK_DIGITS, index + 1, index + 1)
+		digits[t] = if index == Displacement.HOLE then HOLE_DIGIT else string.sub(LOOK_DIGITS, index + 1, index + 1)
 	end
 	config:SetAttribute("Looks", HttpService:JSONEncode(palette))
 	config:SetAttribute("TriLooks", table.concat(digits))
@@ -820,7 +1094,12 @@ local function loadLooks(config: Configuration, triangleCount: number): ({ Look 
 	end
 	local triLooks = table.create(triangleCount)
 	for t = 1, triangleCount do
-		local index = (string.find(LOOK_DIGITS, string.sub(digitsText, t, t), 1, true) or 0) - 1
+		local digit = string.sub(digitsText, t, t)
+		if digit == HOLE_DIGIT then
+			triLooks[t] = Displacement.HOLE
+			continue
+		end
+		local index = (string.find(LOOK_DIGITS, digit, 1, true) or 0) - 1
 		if index < 0 or index > #looks then
 			error(`DispData.TriLooks: character {t} names a look that does not exist`)
 		end
@@ -846,6 +1125,17 @@ function Displacement.save(disp: Displacement, config: Configuration)
 	saveNumbers(config, "Alphas", disp.alphas, 0)
 	config:SetAttribute("Subdiv", disp.subdiv)
 	saveLooks(disp, config)
+	-- Removed points: one character per vertex, "1" for removed; left out when none are.
+	if next(disp.removed) == nil then
+		config:SetAttribute("Removed", nil)
+	else
+		local count = disp.size * disp.size
+		local flags = table.create(count, "0")
+		for v in disp.removed do
+			flags[v] = "1"
+		end
+		config:SetAttribute("Removed", table.concat(flags))
+	end
 end
 
 function Displacement.load(config: Configuration): Displacement
@@ -886,6 +1176,20 @@ function Displacement.load(config: Configuration): Displacement
 		error(`DispData is missing boolean attribute "Subdiv"`)
 	end
 	local looks, triLooks = loadLooks(config, (size - 1) * (size - 1) * 2)
+	local removed: { [number]: true } = {}
+	local flags = config:GetAttribute("Removed")
+	if flags ~= nil then
+		if typeof(flags) ~= "string" or #flags ~= count then
+			error(`DispData.Removed must be a string of {count} characters`)
+		end
+		local n = size - 1
+		for v = 1, count do
+			local isCorner = v == 1 or v == n + 1 or v == n * size + 1 or v == count
+			if string.sub(flags, v, v) == "1" and not isCorner then
+				removed[v] = true
+			end
+		end
+	end
 
 	return {
 		power = power,
@@ -904,6 +1208,8 @@ function Displacement.load(config: Configuration): Displacement
 		materialVariant = if typeof(variant) == "string" then variant else "",
 		looks = looks,
 		triLooks = triLooks,
+		removed = removed,
+		meshCache = nil,
 	}
 end
 

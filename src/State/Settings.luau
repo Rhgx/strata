@@ -13,13 +13,16 @@ export type FaceMode = PartFaces.Mode
 export type Falloff = Paint.Falloff
 export type Axis = Paint.Axis
 -- The viewport tools, in ribbon and tool strip order.
-export type Tool = "Raise" | "Lower" | "Smooth" | "RaiseTo" | "Material" | "PickFaces" | "Stitch"
+export type Tool = "Raise" | "Lower" | "Smooth" | "RaiseTo" | "Material" | "Mesh" | "PickFaces" | "Stitch"
+-- The Mesh tool's modes: remove grid points (the area fills in with fewer, larger triangles), or
+-- delete triangles outright.
+export type MeshMode = "Simplify" | "Holes"
 -- A page shown over the panel instead of the current context.
 export type Overlay = "none" | "settings" | "help"
 
 export type State = {
-	-- The viewport tools share the mouse, so at most one of painting, coloring, picking and
-	-- stitching is on.
+	-- The viewport tools share the mouse, so at most one of painting, coloring, meshing,
+	-- picking and stitching is on.
 	painting: boolean,
 	-- The Material tool: paints looks into tiles.
 	coloring: boolean,
@@ -31,6 +34,11 @@ export type State = {
 	paintVariant: string,
 	-- Material tool: paint single triangles instead of whole grid cells.
 	paintFine: boolean,
+	-- The Mesh tool: removes points or cuts holes.
+	meshing: boolean,
+	meshMode: MeshMode,
+	-- Auto-simplify: how far (degrees) the surface may bend where points are removed.
+	simplifyAngle: number,
 	-- Pick faces mode.
 	picking: boolean,
 	-- Stitch to part mode.
@@ -71,6 +79,9 @@ export type State = {
 	smoothingAngle: number,
 	-- Show the key strip at the bottom of the viewport while a tool runs.
 	showKeyHints: boolean,
+	-- Also put the tool buttons on Studio's Plugins ribbon tab (the panel's tool strip has them
+	-- either way).
+	ribbonTools: boolean,
 }
 
 type Listener = (State) -> ()
@@ -91,6 +102,8 @@ Settings.NOISE_MIN = -64
 Settings.NOISE_MAX = 64
 Settings.STITCH_REACH_MIN = 0.5
 Settings.STITCH_REACH_MAX = 16
+Settings.SIMPLIFY_ANGLE_MIN = 0
+Settings.SIMPLIFY_ANGLE_MAX = 45
 
 local MODES: { BrushMode } = { "Raise", "Lower", "Smooth", "RaiseTo" }
 local MODE_LABELS: { [BrushMode]: string } = {
@@ -99,13 +112,14 @@ local MODE_LABELS: { [BrushMode]: string } = {
 	Smooth = "Smooth",
 	RaiseTo = "Raise To",
 }
-local TOOLS: { Tool } = { "Raise", "Lower", "Smooth", "RaiseTo", "Material", "PickFaces", "Stitch" }
+local TOOLS: { Tool } = { "Raise", "Lower", "Smooth", "RaiseTo", "Material", "Mesh", "PickFaces", "Stitch" }
 local TOOL_LABELS: { [Tool]: string } = {
 	Raise = "Raise",
 	Lower = "Lower",
 	Smooth = "Smooth",
 	RaiseTo = "Raise To",
 	Material = "Material",
+	Mesh = "Mesh",
 	PickFaces = "Pick faces",
 	Stitch = "Stitch",
 }
@@ -154,6 +168,9 @@ local state: State = table.freeze({
 	paintColor = Color3.fromRGB(90, 90, 95),
 	paintVariant = "",
 	paintFine = false,
+	meshing = false,
+	meshMode = "Simplify" :: MeshMode,
+	simplifyAngle = 5,
 	picking = false,
 	stitching = false,
 	sampling = false,
@@ -179,6 +196,7 @@ local state: State = table.freeze({
 	autoBake = true,
 	smoothingAngle = 45,
 	showKeyHints = true,
+	ribbonTools = false,
 })
 
 local listeners: { [Listener]: true } = {}
@@ -199,10 +217,12 @@ function Settings.update(change: (State) -> ())
 	nextState.noiseMin = math.clamp(nextState.noiseMin, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.noiseMax = math.clamp(nextState.noiseMax, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.stitchReach = math.clamp(nextState.stitchReach, Settings.STITCH_REACH_MIN, Settings.STITCH_REACH_MAX)
+	nextState.simplifyAngle = math.clamp(nextState.simplifyAngle, Settings.SIMPLIFY_ANGLE_MIN, Settings.SIMPLIFY_ANGLE_MAX)
 	-- The viewport tools share the mouse: turning one on turns the others off.
 	local turnedOn = if nextState.painting and not state.painting
 		then "painting"
 		elseif nextState.coloring and not state.coloring then "coloring"
+		elseif nextState.meshing and not state.meshing then "meshing"
 		elseif nextState.picking and not state.picking then "picking"
 		elseif nextState.stitching and not state.stitching then "stitching"
 		elseif nextState.sampling and not state.sampling then "sampling"
@@ -210,6 +230,7 @@ function Settings.update(change: (State) -> ())
 	if turnedOn then
 		nextState.painting = turnedOn == "painting"
 		nextState.coloring = turnedOn == "coloring"
+		nextState.meshing = turnedOn == "meshing"
 		nextState.picking = turnedOn == "picking"
 		nextState.stitching = turnedOn == "stitching"
 		nextState.sampling = turnedOn == "sampling"
@@ -237,6 +258,8 @@ function Settings.activeTool(s: State): Tool?
 		return s.mode
 	elseif s.coloring then
 		return "Material"
+	elseif s.meshing then
+		return "Mesh"
 	elseif s.picking then
 		return "PickFaces"
 	elseif s.stitching then
@@ -252,6 +275,7 @@ function Settings.toggleTool(tool: Tool)
 		if Settings.activeTool(s) == tool then
 			s.painting = false
 			s.coloring = false
+			s.meshing = false
 			s.picking = false
 			s.stitching = false
 			return
@@ -259,6 +283,8 @@ function Settings.toggleTool(tool: Tool)
 		s.overlay = "none"
 		if tool == "Material" then
 			s.coloring = true
+		elseif tool == "Mesh" then
+			s.meshing = true
 		elseif tool == "PickFaces" then
 			s.picking = true
 		elseif tool == "Stitch" then
@@ -272,10 +298,11 @@ end
 
 -- Stops whichever viewport tool is running (painting, coloring, picking, stitching or sampling).
 function Settings.stopViewportTool()
-	if state.painting or state.coloring or state.picking or state.stitching or state.sampling then
+	if state.painting or state.coloring or state.meshing or state.picking or state.stitching or state.sampling then
 		Settings.update(function(s)
 			s.painting = false
 			s.coloring = false
+			s.meshing = false
 			s.picking = false
 			s.stitching = false
 			s.sampling = false

@@ -12,7 +12,8 @@
 	Roblox projects a material separately on every part: on wedges the texture is rotated
 	per triangle, while a union gets one continuous projection. A union has a single material,
 	so painted looks bake into their own unions; Surface is missing when paint covers the whole
-	tile. Editing a baked displacement brings the wedges back from DispData.
+	tile. Deleted triangles (holes) keep hidden wedges while editing and are left out of every
+	union. Editing a baked displacement brings the wedges back from DispData.
 
 	The model only holds parts and attributes, so it can be published and inserted like any
 	other model, then reopened by the plugin for editing.
@@ -180,8 +181,8 @@ local function shownPart(opened: Opened): BasePart?
 	if TerrainInstance.isBaked(opened.model) then
 		return nil
 	end
-	for t, index in opened.disp.triLooks do
-		if index == 0 then
+	for t = 1, Displacement.triangleCount(opened.disp) do
+		if Displacement.shownLookIndex(opened.disp, t) == 0 then
 			local wedge = opened.wedges.parts[t * 2 - 1]
 			return if wedge and wedge.Parent == opened.wedges.folder then wedge else nil
 		end
@@ -234,7 +235,8 @@ function TerrainInstance.setAppearance(opened: Opened, material: Enum.Material, 
 	Displacement.save(disp, opened.config)
 	local parts: { BasePart } = {}
 	for n, wedge in opened.wedges.parts do
-		if disp.triLooks[(n + 1) // 2] == 0 then
+		-- Hidden hole wedges too, so a restored triangle shows the tile's look.
+		if Displacement.shownLookIndex(disp, (n + 1) // 2) <= 0 then
 			table.insert(parts, wedge)
 		end
 	end
@@ -369,10 +371,16 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	local faceNormal = Displacement.faceNormal(disp)
 	local positions = Displacement.positions(disp, faceNormal)
 
-	-- The triangles of each look, in look order (the tile's own look first).
+	-- The triangles of each look, in look order (the tile's own look first). Holes are left out.
 	local groups: { [number]: { number } } = {}
 	local order: { number } = {}
-	for t, index in disp.triLooks do
+	local holes = false
+	for t = 1, Displacement.triangleCount(disp) do
+		local index = Displacement.shownLookIndex(disp, t)
+		if index == Displacement.HOLE then
+			holes = true
+			continue
+		end
 		local group = groups[index]
 		if not group then
 			group = {}
@@ -382,11 +390,16 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 		table.insert(group, t)
 	end
 	table.sort(order)
+	if #order == 0 then
+		-- Every triangle is deleted: nothing to union. The hidden wedges stay as they are.
+		return
+	end
 
-	-- A tile in a single look that is flat bakes from one slab instead of its wedges.
+	-- A tile in a single look with no holes that is flat bakes from one slab instead of its
+	-- wedges.
 	local slab: Part? = nil
 	local slabCFrame, slabSize = nil, nil
-	if #order == 1 then
+	if #order == 1 and not holes then
 		slabCFrame, slabSize = flatSlab(disp)
 	end
 	if slabCFrame and slabSize then
@@ -407,7 +420,8 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	-- cube. So it sits below the lowest point of the surface (sculpted tiles can dip far below
 	-- their flat face), and is cut away afterwards. The helper parts are never parented, so they
 	-- stay out of the place and the undo history.
-	local i1, i2, i3 = Displacement.triangle(disp, 1)
+	-- Grid triangle 1, whichever points are removed, so the texture origin never moves.
+	local i1, i2, i3 = Displacement.gridTriangle(disp, 1)
 	local centroid = (positions[i1] + positions[i2] + positions[i3]) / 3
 	local lowest = math.huge
 	for _, position in positions do

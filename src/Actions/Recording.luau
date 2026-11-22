@@ -34,10 +34,10 @@ function Recording.run(name: string, action: () -> ())
 end
 
 -- Bakes everything the current action edited when Bake automatically is on and no viewport
--- tool is running (painting and Stitch bake when they stop instead). Call inside `run`.
+-- tool is running (painting, Mesh and Stitch bake when they stop instead). Call inside `run`.
 function Recording.autoBake()
 	local settings = Settings.get()
-	if settings.autoBake and not settings.painting and not settings.stitching then
+	if settings.autoBake and not settings.painting and not settings.meshing and not settings.stitching then
 		Session.bakeDirty(settings.smoothingAngle)
 	end
 end

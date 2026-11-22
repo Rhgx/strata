@@ -15,13 +15,13 @@ local Tooltip = require(script.Parent.Tooltip)
 
 local e = React.createElement
 
-local BUTTON = 26
--- 7 buttons, 6 gaps and the divider fit the panel's minimum width (220 px, 206 inside).
-local GAP = 2
+local BUTTON = 24
+-- 8 buttons, 7 gaps and the divider fit the panel's minimum width (220 px, 206 inside).
+local GAP = 1
 -- Space for the divider between the brushes and the click tools.
-local DIVIDER = 9
--- The brushes before the divider (Raise, Lower, Smooth, Raise To, Material).
-local BRUSHES = 5
+local DIVIDER = 5
+-- The brushes before the divider (Raise, Lower, Smooth, Raise To, Material, Mesh).
+local BRUSHES = 6
 
 local TIPS: { [Settings.Tool]: string } = {
 	Raise = "**Raise**: push terrain outward.\n\n> Hold `Ctrl` to lower, `Shift` to smooth.",
@@ -29,6 +29,7 @@ local TIPS: { [Settings.Tool]: string } = {
 	Smooth = "**Smooth**: even out bumps.\n\n> Blends across tile seams.",
 	RaiseTo = "**Raise To**: flatten to an exact `Height`.\n\n> Hold `Shift` to smooth.",
 	Material = "**Material**: paint a material into tiles (a road through grass).\n\n> Hold `Ctrl` to erase, `Alt + Right Click` to pick a look.",
+	Mesh = "**Mesh**: fewer triangles where you want them, or cut holes.\n\n> Drag to remove points (or delete triangles), `Ctrl` restores.",
 	PickFaces = "**Pick faces**: click part faces in 3D.\n\n> Click `Create` when ready.",
 	Stitch = "**Stitch**: snap tile edges to a part.\n\n> Click a part in 3D to stitch nearby edges.",
 }
@@ -39,6 +40,7 @@ local ICONS: { [Settings.Tool]: Icons.Icon } = {
 	Smooth = Icons.Smooth,
 	RaiseTo = Icons.RaiseTo,
 	Material = Icons.Material,
+	Mesh = Icons.Mesh,
 	PickFaces = Icons.PickFaces,
 	Stitch = Icons.Stitch,
 }

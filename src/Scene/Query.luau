@@ -33,6 +33,10 @@ export type SelectionInfo = {
 	anyVariant: boolean,
 	-- Selected tiles with painted materials.
 	painted: number,
+	-- Selected tiles with deleted triangles.
+	holes: number,
+	-- Selected tiles with removed points.
+	simplified: number,
 }
 
 export type Appearance = {
@@ -165,10 +169,28 @@ function Query.tilesNear(part: BasePart, pad: number): { Opened }
 	return Session.getAll(models)
 end
 
+local function triLooksOf(model: Model): string?
+	local config = model:FindFirstChild("DispData")
+	local digits = if config then config:GetAttribute("TriLooks") else nil
+	return if typeof(digits) == "string" then digits else nil
+end
+
 -- Whether any triangle of the tile has a painted look (from its saved data).
 function Query.isPainted(model: Model): boolean
+	local digits = triLooksOf(model)
+	return digits ~= nil and string.find(digits, "[1-9a-z]") ~= nil
+end
+
+-- Whether any point of the tile is removed (from its saved data).
+function Query.isSimplified(model: Model): boolean
 	local config = model:FindFirstChild("DispData")
-	return config ~= nil and config:GetAttribute("TriLooks") ~= nil
+	return config ~= nil and config:GetAttribute("Removed") ~= nil
+end
+
+-- Whether any triangle of the tile is deleted (from its saved data).
+function Query.hasHoles(model: Model): boolean
+	local digits = triLooksOf(model)
+	return digits ~= nil and string.find(digits, "-", 1, true) ~= nil
 end
 
 -- The tile's own look (painted triangles aside) as it shows right now: read from its baked
@@ -212,9 +234,17 @@ function Query.selectionInfo(): SelectionInfo
 	local mixedMaterial, mixedColor, mixedVariant = false, false, false
 	local anyVariant = false
 	local painted = 0
+	local holes = 0
+	local simplified = 0
 	for index, model in models do
 		if Query.isPainted(model) then
 			painted += 1
+		end
+		if Query.hasHoles(model) then
+			holes += 1
+		end
+		if Query.isSimplified(model) then
+			simplified += 1
 		end
 		local look = Query.appearanceOf(model)
 		if look then
@@ -253,6 +283,8 @@ function Query.selectionInfo(): SelectionInfo
 		variant = if mixedVariant then nil else variant,
 		anyVariant = anyVariant,
 		painted = painted,
+		holes = holes,
+		simplified = simplified,
 	}
 end
 

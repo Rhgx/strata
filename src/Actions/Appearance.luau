@@ -85,7 +85,8 @@ function Appearance.variants(material: Enum.Material): { string }
 end
 
 -- The parts showing a tile's own look: its baked union and the wedges of unpainted triangles
--- (painted ones keep their looks).
+-- (painted ones keep their looks). Hidden hole wedges are included, so a restored triangle
+-- shows the tile's look.
 local function partsOf(model: Model): { BasePart }
 	local parts: { BasePart } = {}
 	local surface = model:FindFirstChild("Surface")
@@ -94,6 +95,8 @@ local function partsOf(model: Model): { BasePart }
 	end
 	local config = model:FindFirstChild("DispData")
 	local triLooks = if config then config:GetAttribute("TriLooks") else nil
+	-- With points removed, wedges follow the shown triangles, not the saved grid.
+	local opened = if config and config:GetAttribute("Removed") ~= nil then Session.get(model) else nil
 	local tris = model:FindFirstChild("Tris")
 	if tris then
 		for _, child in tris:GetChildren() do
@@ -102,7 +105,14 @@ local function partsOf(model: Model): { BasePart }
 				continue
 			end
 			local t = (n + 1) // 2
-			if typeof(triLooks) ~= "string" or string.sub(triLooks, t, t) == "0" then
+			local own
+			if opened then
+				own = t <= Displacement.triangleCount(opened.disp) and Displacement.shownLookIndex(opened.disp, t) <= 0
+			else
+				local digit = if typeof(triLooks) == "string" then string.sub(triLooks, t, t) else "0"
+				own = digit == "0" or digit == "-"
+			end
+			if own then
 				table.insert(parts, child)
 			end
 		end
@@ -182,8 +192,39 @@ function Appearance.clearPaint(): number
 		for _, opened in targets do
 			local disp = opened.disp
 			local triangles: { number } = {}
+			-- Holes stay deleted: they are not paint.
 			for t, index in disp.triLooks do
-				if index ~= 0 then
+				if index > 0 then
+					disp.triLooks[t] = 0
+					table.insert(triangles, t)
+				end
+			end
+			Session.updateLooks(opened, triangles)
+			TerrainInstance.save(opened)
+		end
+		Recording.autoBake()
+	end)
+	return #targets
+end
+
+-- Brings back the deleted triangles of the selected tiles (in each tile's own look), as one undo
+-- step. Returns how many tiles changed.
+function Appearance.restoreHoles(): number
+	local targets: { Opened } = {}
+	for _, opened in Query.selectedTiles() do
+		if Displacement.holeCount(opened.disp) > 0 then
+			table.insert(targets, opened)
+		end
+	end
+	if #targets == 0 then
+		return 0
+	end
+	Recording.run("Strata restore triangles", function()
+		for _, opened in targets do
+			local disp = opened.disp
+			local triangles: { number } = {}
+			for t, index in disp.triLooks do
+				if index == Displacement.HOLE then
 					disp.triLooks[t] = 0
 					table.insert(triangles, t)
 				end

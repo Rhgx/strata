@@ -5,6 +5,7 @@
 	edits.
 ]]
 
+local Displacement = require(script.Parent.Parent.Core.Displacement)
 local Sew = require(script.Parent.Parent.Core.Sew)
 local Stitch = require(script.Parent.Parent.Core.Stitch)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
@@ -111,6 +112,42 @@ function Edges.restorePins(pins: Stitch.Moves): { Opened }
 	return changed
 end
 
+--[[
+	Where `tiles` have removed points on an edge, that edge shows straight between its kept
+	points, so a neighbor's point at the same spot would stick out of the seam and leave a crack.
+	Moves those neighbor points onto the straight edge (and in-between points of a denser
+	neighbor along with them), like stitching onto a part. Returns the displacements that
+	changed; the caller saves them.
+]]
+function Edges.closeRemovedSeams(tiles: { Opened }): { Opened }
+	local moves: Stitch.Moves = {}
+	for _, opened in tiles do
+		local disp = opened.disp
+		if next(disp.removed) == nil then
+			continue
+		end
+		Displacement.reproject(disp)
+		local pivot = opened.model:GetPivot()
+		local normal = Displacement.faceNormal(disp)
+		local targets: { [number]: Vector3 } = {}
+		for _, edge in Displacement.edges(disp) do
+			for _, v in edge.indices do
+				if disp.removed[v] then
+					targets[v] = pivot * Displacement.position(disp, v, normal)
+				end
+			end
+		end
+		if next(targets) ~= nil then
+			moves[opened] = targets
+		end
+	end
+	if next(moves) == nil then
+		return {}
+	end
+	local _, changed = applyMoves(moves)
+	return changed
+end
+
 -- Sews `focus` to every displacement in the place. With Keep edges stitched on, edges that
 -- touched a part before the edit (`pins`, or found now) are snapped back onto it afterwards,
 -- so the part wins at shared corners. Call inside a recording.
@@ -128,6 +165,11 @@ function Edges.autosew(focus: { Opened }, pins: Stitch.Moves?)
 		for _, opened in Edges.restorePins(pinned) do
 			TerrainInstance.save(opened)
 		end
+	end
+	-- Sewing averages seam points, which can lift a neighbor's point off an edge that a
+	-- simplified tile shows straight.
+	for _, opened in Edges.closeRemovedSeams(Session.getAll(Session.models())) do
+		TerrainInstance.save(opened)
 	end
 end
 
@@ -186,9 +228,16 @@ function Edges.stitchSelected(): StitchReport
 	return report
 end
 
--- What stitching nearby tiles to `part` would do, without changing anything.
+-- What stitching nearby tiles to `part` would do, without changing anything. Parts joined to
+-- `part` along shared edges (the rest of a floor made of wedges) count as one outline with it.
 function Edges.previewStitch(part: BasePart, reach: number): Stitch.Result
-	return Stitch.match(Query.tilesNear(part, reach + 0.5), { part }, reach, true)
+	local tiles = Query.tilesNear(part, reach + 0.5)
+	if #tiles == 0 then
+		return { moves = {}, matches = {} }
+	end
+	local normal = tiles[1].model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(tiles[1].disp))
+	local parts = Stitch.sheet(part, Query.touchingParts(tiles, reach + 0.5), normal)
+	return Stitch.match(tiles, parts, reach, true)
 end
 
 -- Stitches every tile near `part` to it (the Stitch tool). Baking waits until the tool stops.

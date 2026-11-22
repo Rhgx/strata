@@ -118,15 +118,22 @@ function WedgeBuilder.updateTriangles(
 end
 
 -- Gives the wedges of `triangles` the look each triangle shows (painted or the tile's own).
+-- Holes keep their wedges, so wedge numbering stays fixed, but hide them: invisible, no
+-- collision, no shadow, and ignored by raycasts and clicks.
 function WedgeBuilder.applyLooks(disp: Displacement.Displacement, wedges: Wedges, triangles: { number })
 	for _, t in triangles do
 		local look = Displacement.lookOf(disp, t)
+		local hole = Displacement.isHole(disp, t)
 		for n = t * 2 - 1, t * 2 do
 			local part = wedges.parts[n]
 			if part then
 				part.Material = look.material
 				part.Color = look.color
 				part.MaterialVariant = look.variant
+				part.Transparency = if hole then 1 else 0
+				part.CanCollide = not hole
+				part.CanQuery = not hole
+				part.CastShadow = not hole
 			end
 		end
 	end

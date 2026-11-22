@@ -49,6 +49,15 @@ local MATERIAL_KEYS: { KeyHint } = {
 	{ key = "Esc", action = "Stop tool" },
 }
 
+local MESH_KEYS: { KeyHint } = {
+	{ key = "Left Drag", action = "Mark points / cut holes" },
+	{ key = "Ctrl", action = "Restore" },
+	{ key = "Click", action = "Toggle a point (Simplify)" },
+	{ key = "Enter or X", action = "Apply marks" },
+	{ key = "Ctrl + Scroll", action = "Resize brush" },
+	{ key = "Esc", action = "Clear marks, then stop" },
+}
+
 local STITCH_KEYS: { KeyHint } = {
 	{ key = "Left Click", action = "Stitch part" },
 	{ key = "Ctrl + Scroll", action = "Change reach" },
@@ -114,13 +123,15 @@ local function HelpPage()
 		PaintKeys = keyTable(5, PAINT_KEYS),
 		MaterialHeading = Rows.section(6, "Material shortcuts"),
 		MaterialKeys = keyTable(7, MATERIAL_KEYS),
-		StitchHeading = Rows.section(8, "Stitch shortcuts"),
-		StitchKeys = keyTable(9, STITCH_KEYS),
-		PickHeading = Rows.section(10, "Pick faces shortcuts"),
-		PickKeys = keyTable(11, PICK_KEYS),
-		BracketNote = Rows.paragraph(12, "[ and ] also resize the brush or change reach.", "dimmed"),
-		TipDivider = Rows.divider(13),
-		Tip = Rows.paragraph(14, "Hover any control for details. Ctrl + Z undoes each step. The gear opens Settings.", "dimmed"),
+		MeshHeading = Rows.section(8, "Mesh shortcuts"),
+		MeshKeys = keyTable(9, MESH_KEYS),
+		StitchHeading = Rows.section(10, "Stitch shortcuts"),
+		StitchKeys = keyTable(11, STITCH_KEYS),
+		PickHeading = Rows.section(12, "Pick faces shortcuts"),
+		PickKeys = keyTable(13, PICK_KEYS),
+		BracketNote = Rows.paragraph(14, "[ and ] also resize the brush or change reach.", "dimmed"),
+		TipDivider = Rows.divider(15),
+		Tip = Rows.paragraph(16, "Hover any control for details. Ctrl + Z undoes each step. The gear opens Settings.", "dimmed"),
 	})
 end
 
