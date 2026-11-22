@@ -410,18 +410,48 @@ function Edges.stitchSelected(): StitchReport
 end
 
 -- Computes what stitching nearby tiles to `part` would change without mutating anything. Parts
--- joined to `part` along shared edges (such as multi-wedge floors) are merged into one outline.
+-- joined to `part` along shared edges (such as multi-wedge floors or meeting walls) are merged
+-- into one outline per tile orientation, so a nearby vertical tile cannot break a floor's sheet.
 function Edges.previewStitch(part: BasePart, reach: number): Stitch.Result
 	local tiles = Query.tilesNear(part, reach + 0.5)
+	local result: Stitch.Result = { moves = {}, matches = {} }
 
 	if #tiles == 0 then
-		return { moves = {}, matches = {} }
+		return result
 	end
 
-	local normal = tiles[1].model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(tiles[1].disp))
-	local parts = Stitch.sheet(part, Query.touchingParts(tiles, reach + 0.5), normal)
+	local pool = Query.touchingParts(tiles, reach + 0.5)
+	local groups: { { normal: Vector3, tiles: { Opened } } } = {}
 
-	return Stitch.match(tiles, parts, reach, true)
+	for _, opened in tiles do
+		local normal = opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		local group = nil
+
+		for _, existing in groups do
+			if existing.normal:Dot(normal) > 0.999 then
+				group = existing
+				break
+			end
+		end
+
+		if group then
+			table.insert(group.tiles, opened)
+		else
+			table.insert(groups, { normal = normal, tiles = { opened } })
+		end
+	end
+
+	for _, group in groups do
+		local matched = Stitch.match(group.tiles, Stitch.sheet(part, pool, group.normal), reach, true)
+
+		for opened, moves in matched.moves do
+			result.moves[opened] = moves
+		end
+
+		table.move(matched.matches, 1, #matched.matches, #result.matches + 1, result.matches)
+	end
+
+	return result
 end
 
 -- Stitches every tile near `part` onto it (used by the Stitch tool; baking waits until tool exit).

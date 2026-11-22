@@ -955,10 +955,16 @@ return function (plugin: Plugin): () -> ()
 		table.insert(connections, connection)
 	end
 
-	-- Shows a 3D movement direction arrow for explicit world axes (X, Z, Picked) in Raise and
-	-- Lower so custom axes are visible in the viewport instead of only as numbers in the panel.
-	local function placeAxisArrow(position: Vector3, settings: Settings.State, mode: Paint.Effect)
-		if (mode ~= "Raise" and mode ~= "Lower") or (settings.axis ~= "X" and settings.axis ~= "Z" and settings.axis ~= "Picked") then
+	-- Shows a 3D movement direction arrow in Raise and Lower for explicit world axes (X, Z,
+	-- Picked), and for Up (Y) when the hovered surface tilts more than ~45 degrees from horizontal
+	-- (where Up slides points along the wall instead of pushing outward).
+	local function placeAxisArrow(position: Vector3, normal: Vector3, settings: Settings.State, mode: Paint.Effect)
+		local showAxis = settings.axis == "X"
+			or settings.axis == "Z"
+			or settings.axis == "Picked"
+			or (settings.axis == "Up" and math.abs(normal.Y) < 0.7)
+
+		if (mode ~= "Raise" and mode ~= "Lower") or not showAxis then
 			hideAxisArrow()
 			return
 		end
@@ -1014,7 +1020,7 @@ return function (plugin: Plugin): () -> ()
 
 		-- Dim slightly while dragging so terrain stays clear.
 		ring.Transparency = if empty then 0.6 elseif recording then 0.45 else 0.2
-		placeAxisArrow(position, settings, mode)
+		placeAxisArrow(position, normal, settings, mode)
 	end
 
 	local function isEmpty(preview: Paint.Preview?): boolean

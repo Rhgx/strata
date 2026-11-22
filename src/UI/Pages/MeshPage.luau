@@ -215,7 +215,7 @@ local function MeshPage(props: { settings: Settings.State })
 						e(StudioComponents.Button, {
 							Size = UDim2.fromScale(1, 1),
 							Text = if busy then "Working..." else "Select flat",
-							Icon = Icons.AutoSimplify,
+							Icon = Icons.Select,
 							Disabled = noScope or busy,
 
 							OnActivated = function ()
@@ -252,7 +252,7 @@ local function MeshPage(props: { settings: Settings.State })
 						e(StudioComponents.Button, {
 							Size = UDim2.fromScale(1, 1),
 							Text = "Restore all",
-							Icon = Icons.RestorePoints,
+							Icon = Icons.Unsimplify,
 							Disabled = noScope,
 
 							OnActivated = function ()
@@ -308,7 +308,7 @@ local function MeshPage(props: { settings: Settings.State })
 					e(StudioComponents.Button, {
 						Size = UDim2.fromScale(1, 1),
 						Text = "Clear",
-						Icon = Icons.ClearMarks,
+						Icon = Icons.Clear,
 						OnActivated = MeshStage.clear,
 					}),
 					2

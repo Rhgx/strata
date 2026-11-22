@@ -121,7 +121,7 @@ return function (plugin: Plugin): () -> ()
 			elseif result == 0 then
 				Status.post("warning", `The selected tiles already look like {part.Name}.`)
 			elseif hidden == result then
-				Status.post("warning", `Copied {describe(part)} to {Format.plural(result, "tile")}, but paint covers all of it. Clear paint to show it.`)
+				Status.post("warning", `Copied {describe(part)} to {Format.plural(result, "tile")}, but paint covers all of it. Use Clear paint under Reset to show it.`)
 			else
 				Status.post("success", `Copied {describe(part)} from {part.Name} to {Format.plural(result, "tile")}.`)
 			end

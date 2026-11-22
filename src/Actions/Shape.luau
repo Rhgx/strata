@@ -259,8 +259,34 @@ function Shape.addNoise(min: number, max: number): number
 	return count
 end
 
+-- True when `instance` is a dedicated terrain area Model (untagged Model containing only tiles)
+-- so splitting inside a general map Model wraps quarters in a new area instead of scattering them.
+local function isTerrainContainer(instance: Instance): boolean
+	if not instance:IsA("Model") or CollectionService:HasTag(instance, TerrainInstance.TAG) then
+		return false
+	end
+
+	for _, child in instance:GetChildren() do
+		if not CollectionService:HasTag(child, TerrainInstance.TAG) then
+			return false
+		end
+	end
+
+	return true
+end
+
+-- True when a standalone tile still has an auto-generated or blank name rather than a custom one.
+local function isGenericTileName(name: string): boolean
+	local trimmed = string.match(name, "^%s*(.-)%s*$") or ""
+
+	return trimmed == ""
+		or trimmed == "Displacement"
+		or trimmed == TerrainInstance.TILE_NAME
+		or string.match(trimmed, `^{TerrainInstance.TILE_NAME} %d+$`) ~= nil
+end
+
 -- Losslessly splits each selected displacement into 2x2 displacements one power lower (see
--- Displacement.split). Quarters are placed in the source's TerrainArea (or a new container in
+-- Displacement.split). Quarters are placed in the source's terrain area (or a new area Model in
 -- its place) and selected. Fully-deleted quarters are omitted. Returns (splitCount, skippedPower2).
 function Shape.split(): (number, number)
 	local splittable: { Opened } = {}
@@ -293,15 +319,19 @@ function Shape.split(): (number, number)
 				continue
 			end
 
-			-- Reuse an enclosing TerrainArea; otherwise create one where the split tile sat.
+			-- Reuse an enclosing terrain area; otherwise create a new area where the split tile sat.
 			local container: Instance = parent
+			local createdContainer = false
 
-			if not (parent:IsA("Model") and not CollectionService:HasTag(parent, TerrainInstance.TAG)) then
+			if not isTerrainContainer(parent) then
 				local area = Instance.new("Model")
-				area.Name = model.Name
+				area.Name = if isGenericTileName(model.Name)
+					then TerrainInstance.nextName(parent, TerrainInstance.AREA_NAME)
+					else model.Name
 				area.WorldPivot = pivot
 				area.Parent = parent
 				container = area
+				createdContainer = true
 			end
 
 			for _, quarter in Displacement.split(opened.disp) do
@@ -311,12 +341,10 @@ function Shape.split(): (number, number)
 					continue
 				end
 
-				local child = TerrainInstance.create(
-					quarter.disp,
-					pivot * CFrame.new(quarter.center),
-					container,
-					`{model.Name}_{quarter.row}_{quarter.col}`
-				)
+				local name = if createdContainer
+					then `Tile_{quarter.row}_{quarter.col}`
+					else `{model.Name}_{quarter.row}_{quarter.col}`
+				local child = TerrainInstance.create(quarter.disp, pivot * CFrame.new(quarter.center), container, name)
 				table.insert(quarters, child)
 			end
 

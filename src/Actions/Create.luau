@@ -6,8 +6,9 @@
 
 	Each face is subdivided according to the tile size; adjacent faces on the same part receive
 	matching tile counts along shared edges so every tile starts sewn, including around corners.
-	Multi-face parts or multi-tile faces are grouped in a "TerrainArea" Model. Source parts are
-	parented to nil so Ctrl+Z restores them. Faces thinner than PartFaces.MIN_FACE_SIZE are skipped.
+	Multi-face parts or multi-tile faces are grouped in a Model inheriting the source part's custom
+	name (or the next free "TerrainArea" / "TerrainTile" when generic). Source parts are parented
+	to nil so Ctrl+Z restores them. Faces thinner than PartFaces.MIN_FACE_SIZE are skipped.
 ]]
 
 local Selection = game:GetService("Selection")
@@ -54,6 +55,8 @@ export type Plan = {
 	wedges: number,
 	-- Faces that will convert but are narrower than PartFaces.THIN_FACE_SIZE.
 	thinFaces: number,
+	-- Non-thin faces whose generated tiles would have an aspect ratio above STRETCHED_ASPECT.
+	stretchedFaces: number,
 	-- Faces that will be skipped (narrower than PartFaces.MIN_FACE_SIZE).
 	skippedFaces: number,
 	-- Highest tile count any single part would produce; Create rejects parts over MAX_TILES_PER_PART.
@@ -72,6 +75,8 @@ type Job = {
 
 -- Prevents a single click with a tiny tile size from freezing Studio.
 local MAX_TILES_PER_PART = 400
+-- Warn on Create when generated tiles are stretched past this aspect ratio (2:1).
+local STRETCHED_ASPECT = 2
 -- Yield periodically while building large areas so Studio remains responsive.
 local TILES_PER_YIELD = 8
 
@@ -205,7 +210,7 @@ local function pickJobs(picks: { Pick }): ({ Job }, number)
 end
 
 local function planJobs(jobs: { Job }, skippedFaces: number, power: number, tileSize: number): Plan
-	local faces, tiles, thin, largest = 0, 0, 0, 0
+	local faces, tiles, thin, stretched, largest = 0, 0, 0, 0, 0
 
 	for _, job in jobs do
 		local partTiles = 0
@@ -217,6 +222,13 @@ local function planJobs(jobs: { Job }, skippedFaces: number, power: number, tile
 
 			if math.min(face.width, face.depth) < PartFaces.THIN_FACE_SIZE then
 				thin += 1
+			else
+				local tileW, tileD = face.width / nx, face.depth / nz
+				local short = math.min(tileW, tileD)
+
+				if short > 1e-6 and math.max(tileW, tileD) / short > STRETCHED_ASPECT then
+					stretched += 1
+				end
 			end
 		end
 
@@ -230,6 +242,7 @@ local function planJobs(jobs: { Job }, skippedFaces: number, power: number, tile
 		tiles = tiles,
 		wedges = tiles * Create.wedgesPerTile(power),
 		thinFaces = thin,
+		stretchedFaces = stretched,
 		skippedFaces = skippedFaces,
 		largestPart = largest,
 	}
@@ -286,6 +299,24 @@ local function createTile(
 	return TerrainInstance.create(disp, pivot, parent, name, skipWedges)
 end
 
+-- Default Studio names replaced by numbered TerrainArea / TerrainTile names on conversion.
+local GENERIC_PART_NAMES: { [string]: true } = {
+	Part = true,
+	Wedge = true,
+	WedgePart = true,
+}
+
+-- Keeps meaningful builder-assigned names verbatim; numbers generic or blank part names per parent.
+local function resolveName(part: BasePart, parent: Instance, fallback: string): string
+	local trimmed = string.match(part.Name, "^%s*(.-)%s*$") or ""
+
+	if trimmed == "" or trimmed == part.ClassName or GENERIC_PART_NAMES[trimmed] then
+		return TerrainInstance.nextName(parent, fallback)
+	end
+
+	return part.Name
+end
+
 local function createJob(
 	job: Job,
 	parent: Instance,
@@ -310,7 +341,8 @@ local function createJob(
 
 	if single and total == 1 then
 		local face = job.faces[1]
-		local opened = createTile(face.pivot, Vector3.zero, face.width, face.depth, power, part, parent, "Displacement", skipWedges)
+		local name = resolveName(part, parent, TerrainInstance.TILE_NAME)
+		local opened = createTile(face.pivot, Vector3.zero, face.width, face.depth, power, part, parent, name, skipWedges)
 
 		table.insert(created, opened)
 		part.Parent = nil
@@ -318,7 +350,7 @@ local function createJob(
 	end
 
 	local area = Instance.new("Model")
-	area.Name = "TerrainArea"
+	area.Name = resolveName(part, parent, TerrainInstance.AREA_NAME)
 	-- Single-face areas inherit the face pivot; multi-face areas use the source part's pivot.
 	area.WorldPivot = if single then job.faces[1].pivot else part.CFrame
 	area.Parent = parent
@@ -332,7 +364,7 @@ local function createJob(
 		for ix = 1, nx do
 			for iz = 1, nz do
 				local center = Vector3.new(-face.width / 2 + (ix - 0.5) * tileX, 0, -face.depth / 2 + (iz - 0.5) * tileZ)
-				local name = if single then `Disp_{ix}_{iz}` else `{face.id}_{ix}_{iz}`
+				local name = if single then `Tile_{ix}_{iz}` else `{face.id}_{ix}_{iz}`
 
 				table.insert(created, createTile(face.pivot, center, tileX, tileZ, power, part, area, name, skipWedges))
 				built += 1

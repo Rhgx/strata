@@ -169,7 +169,7 @@ local function RebakeButton(props: { LayoutOrder: number })
 			.. "Tiles baked before a change keep their old unions until rebaked.\n\n"
 			.. `> Can take a few seconds on big places. Over {CONFIRM_ABOVE} tiles, click twice.`,
 		total == 0,
-		Icons.BakeAll
+		Icons.RebakeAll
 	)
 end
 

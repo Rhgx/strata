@@ -19,7 +19,7 @@ The panel is split into three vertical regions:
 
 - `src/UI/useSettings.luau`: subscribes components to `State/Settings`.
 - `src/UI/useRefresh.luau`: re-renders on `Selection.SelectionChanged`, `ChangeHistoryService.OnUndo`/`OnRedo`, and `State/Status` updates.
-- `src/UI/Icons.luau`: wraps `Lucide.GetAsset(name, 48)` with theme tinting (`16x16` in the tool strip and status bar; `14x14` in page buttons and dropdown items).
+- `src/UI/Icons.luau`: wraps `Lucide.GetAsset(name, 48)` with theme tinting (`16x16` in the tool strip and status bar; `14x14` for in-page buttons and dropdown items).
 - `src/State/Format.luau`: comma-grouped counts, plurals, stud lengths (`Format.studs`), and hex / `"R, G, B"` color formatting shared across UI, status messages, and 3D labels.
 
 ## Viewport shortcuts and tools
@@ -94,7 +94,7 @@ Layout constants: `LABEL_WIDTH = 66`, `ROW_HEIGHT = 22`, `BUTTON_HEIGHT = 24`, `
 - `Rows.page(children)`: `StudioComponents.ScrollFrame` oversized by 1 px per side so the widget clips its outer border cleanly.
 - `Rows.section`, `Rows.title`, `Rows.header`, `Rows.divider`: dimmed headings, tool headers (name + Stop button), overlay headers (back button + title), and 1 px themed dividers.
 - `Rows.property`, `Rows.value`: two-column rows (66 px label, remaining width for control) with whole-row hover tooltips.
-- `Rows.grid`: equal-width `UIGridLayout` rows (at most 2 columns for icon buttons at minimum panel width).
+- `Rows.grid`: equal-width `UIGridLayout` rows (two columns fit cleanly down to the minimum panel width).
 - `Rows.button`, `Rows.checkbox`, `Rows.withTooltip`: full-width controls with hover tooltips.
 - `Rows.paragraph`: wrapping themed `TextLabel` using `AutomaticSize.Y` (since `StudioComponents.Label` does not auto-size).
 - `Rows.collapsible`: chevron-headed section whose open/closed state persists per section ID for the Studio session.
@@ -138,7 +138,7 @@ Drags track pointer movement through a transparent full-widget overlay button (t
 
 ## Viewport cursors and radius preview
 
-- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). When the ring holds no point (or every hit point is pinned during a drag), it dims and shows `Pinned` mid-stroke; holding `Ctrl` or `Shift` shows the overridden mode name next to the cursor; and `X`, `Z`, and `Picked` axes draw a 3D direction arrow at the cursor. Turning on `Settings > Interface > Show brush dots` (off by default) also draws always-on-top dots on every kept point inside the ring, more solid where the brush pushes harder (hidden above 64 points), and faint dots on up to 4 nearest points when the ring is empty.
+- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). When the ring holds no point (or every hit point is pinned during a drag), it dims and shows `Pinned` mid-stroke; holding `Ctrl` or `Shift` shows the overridden mode name next to the cursor; and `X`, `Z`, `Picked`, and steep-wall `Up (Y)` axes draw a 3D direction arrow at the cursor in `Raise` and `Lower`. Turning on `Settings > Interface > Show brush dots` (off by default) also draws always-on-top dots on every kept point inside the ring, more solid where the brush pushes harder (hidden above 64 points), and faint dots on up to 4 nearest points when the ring is empty.
 - **`Material` and `Mesh` (`Cut holes`)**: `TriangleOutline` traces the outer edges of the exact shown triangles a click will modify (blue to paint or restore, red to erase or cut).
 - **`Mesh` (`Simplify`)**: highlights the points a click or drag will remove or restore over a wireframe of the hovered tile, including the nearest point a click always toggles.
 - **`Stitch` and `Pick faces`**: highlight candidate parts, edges, and faces.

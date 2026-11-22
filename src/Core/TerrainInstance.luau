@@ -85,6 +85,29 @@ export type BakeOptions = {
 local TerrainInstance = {}
 
 TerrainInstance.TAG = "StrataDisplacement"
+TerrainInstance.AREA_NAME = "TerrainArea"
+TerrainInstance.TILE_NAME = "TerrainTile"
+
+-- Returns `base`, or the lowest unused `base 2`, `base 3`, ... among `parent`'s direct children.
+function TerrainInstance.nextName(parent: Instance, base: string): string
+	local used: { [string]: true } = {}
+
+	for _, child in parent:GetChildren() do
+		used[child.Name] = true
+	end
+
+	if not used[base] then
+		return base
+	end
+
+	local index = 2
+
+	while used[`{base} {index}`] do
+		index += 1
+	end
+
+	return `{base} {index}`
+end
 
 local function computeBounds(disp: Displacement.Displacement, known: { Vector3 }?): (Vector3, Vector3)
 	local positions: { Vector3 } = known or Displacement.positions(disp)

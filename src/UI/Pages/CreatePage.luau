@@ -124,7 +124,7 @@ local function CreatePage(props: Props)
 				end,
 			}),
 			"**Target tile width** in studs.\n\n"
-				.. "Larger faces split into a seamless grid inside a `TerrainArea` model.\n\n"
+				.. "Larger faces split into a seamless grid in a model named after the part (`TerrainArea` if unnamed).\n\n"
 				.. "> Example: 32 for general ground, or match a texture repeat."
 		),
 
@@ -276,6 +276,16 @@ local function CreatePage(props: Props)
 			"**Thin faces** make costly narrow strips.\n\n"
 				.. `Faces under {PartFaces.THIN_FACE_SIZE} studs cost as many wedges as a full tile.\n\n`
 				.. "> Set `Faces` to `Top` if you only meant the top."
+		)
+	elseif plan.stretchedFaces > 0 then
+		children.Warning = Rows.value(
+			10,
+			"Warning",
+			Format.plural(plan.stretchedFaces, "stretched face"),
+			"warning",
+			"**Stretched tiles** have cells over 2:1 and sculpt unevenly.\n\n"
+				.. "Hammer-style grids stretch across rectangular faces.\n\n"
+				.. "> Lower `Tile size` or split long parts into closer-to-square pieces."
 		)
 	end
 

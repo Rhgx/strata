@@ -59,7 +59,7 @@ local function PointsPage()
 			"**Select every handle** on these tiles.\n\n"
 				.. "`Move` shifts the group, `Rotate` swings it around its center, and `Scale` spreads or gathers it.",
 			info.points == 0,
-			Icons.SelectAll
+			Icons.Select
 		),
 
 		Done = Rows.button(

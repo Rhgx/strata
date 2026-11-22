@@ -43,7 +43,7 @@ local function bakeAllButton(layoutOrder: number, info: Query.PlaceInfo)
 			.. "Merges each tile into a single union.\n\n"
 			.. "> Run before publishing if `Bake automatically` is off.",
 		nil,
-		Icons.BakeAll,
+		Icons.BakeTiles,
 		true
 	)
 end
@@ -110,7 +110,7 @@ local function OverviewPage()
 				e(StudioComponents.Button, {
 					Size = UDim2.fromScale(1, 1),
 					Text = "Select all",
-					Icon = Icons.SelectAll,
+					Icon = Icons.Select,
 
 					OnActivated = function ()
 						local models: { Instance } = {}

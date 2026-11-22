@@ -216,7 +216,7 @@ function Rows.value(layoutOrder: number, label: string, text: string, tone: Tone
 	)
 end
 
--- Equal-width cell grid. Icon buttons should use at most 2 columns at the minimum panel width.
+-- Equal-width cell grid. Two columns fit cleanly down to the minimum panel width.
 function Rows.grid(layoutOrder: number, columns: number, cells: { [string]: unknown })
 	local content = table.clone(cells)
 	content.Grid = e("UIGridLayout", {
@@ -238,7 +238,8 @@ function Rows.withTooltip(tooltip: string, control: unknown, layoutOrder: number
 	return e(Tooltip, { Text = tooltip, LayoutOrder = layoutOrder, Size = size }, control)
 end
 
--- Full-width button with a hover tooltip. Set `primary = true` for at most one main action per page.
+-- Full-width button with an optional 14 px icon and hover tooltip. Set `primary = true` for at
+-- most one main action per page.
 function Rows.button(
 	layoutOrder: number,
 	text: string,

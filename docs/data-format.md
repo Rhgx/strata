@@ -16,7 +16,7 @@ Defined in `src/Core/TerrainInstance.luau`:
 
 - **Editing vs. baked**: a tile is either **editing** (`Tris` populated, no surface parts) or **baked** (one or more `Surface` / `Surface_<k>` unions present, or a plain `Part` when `Plain Part for flat tiles` is enabled, with `Tris` empty). `TerrainInstance.surfaces` lists surface parts and `TerrainInstance.isBaked` checks whether any exist.
 - **One union per look**: Roblox unions hold only one material, so each painted look bakes into its own `Surface_<k>`. `Surface` is omitted if paint covers every triangle on the tile.
-- **Containers and naming**: `Create` (`src/Actions/Create.luau`) groups multi-face or multi-tile conversions inside a `TerrainArea` `Model`, naming tiles `Disp_<ix>_<iz>` (single face) or `<FaceId>_<ix>_<iz>` (multiple faces). A single-face, single-tile conversion creates a standalone `Model` named `Displacement`.
+- **Containers and naming**: `Create` (`src/Actions/Create.luau`) keeps custom source part names verbatim on the created area or tile `Model`. Generic part names (`Part`, `Wedge`, `WedgePart`, or blank) are numbered per parent as `TerrainArea`, `TerrainArea 2`, ... (multi-face or multi-tile) or `TerrainTile`, `TerrainTile 2`, ... (single tile). Tiles inside an area are named `Tile_<ix>_<iz>` (single face) or `<FaceId>_<ix>_<iz>` (multiple faces).
 - **Discovery tag**: every tile `Model` carries the `CollectionService` tag `StrataDisplacement` (`TerrainInstance.TAG`). `Scene/Session.models()` finds all tagged `Model`s under `workspace`.
 
 ## Grid layout and surface math
@@ -117,7 +117,7 @@ Shown triangles come from a deterministic Bowyer-Watson Delaunay triangulation o
 
 - **Closing cracks**: removing an edge vertex makes that tile edge straight between its kept endpoints. `Edges.closeRemovedSeams` pulls a neighboring tile's vertex at the same spot onto that straight edge; `autosew` and `Sew tiles` run it after sewing.
 - **Stitch propagation**: `Stitch.propagate` moves a denser neighbor's in-between vertices onto the straight edge anchored on the moving tile's vertices, but skips any vertex with its own twin on another moving tile (so equal-density seams stay closed).
-- **Mirroring marks**: `Actions/Mesh.applyMarks` (and `Restore points` on the Tiles page) mirrors edge marks onto neighboring seam vertices (`Edges.seamTwins`) and propagates any existing removed seam vertices on changed tiles to their neighbors. Corners, painted-border vertices, and hole-outline vertices are never removed; a neighbor's vertex is pulled onto the straight edge instead.
+- **Mirroring marks**: `Actions/Mesh.applyMarks` (and `Unsimplify` under `Reset` on the Tiles page) mirrors edge marks onto neighboring seam vertices (`Edges.seamTwins`) and propagates any existing removed seam vertices on changed tiles to their neighbors. Corners, painted-border vertices, and hole-outline vertices are never removed; a neighbor's vertex is pulled onto the straight edge instead.
 
 ### Detail changes, `Split 2x2`, and staging
 

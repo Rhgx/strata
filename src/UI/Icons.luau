@@ -2,8 +2,7 @@
 --[[
 	Lucide icons (https://lucide.dev) sourced from the latte-soft/lucide-icons sprite sheets.
 	Uses 16 px icons for the tool strip and status bar, and 14 px icons for in-page buttons and
-	dropdown items so two-column layouts fit at the minimum panel width. All icons tint to
-	Studio's theme text color.
+	dropdown items. All icons tint to Studio's theme text color.
 ]]
 
 local Plugin = script.Parent.Parent
@@ -55,33 +54,30 @@ return table.freeze({
 
 	-- In-page buttons (14 px).
 	StopTool = item("circle-stop"),
-	Noise = item("audio-waveform"),
-	CreateArea = item("grid-3x3"),
-	StartPickFaces = item("mouse-pointer-click"),
 	Clear = item("x"),
+	CopyAppearance = item("pipette"),
+	Back = item("arrow-left"),
+	Select = item("box-select"),
+	EditPoints = item("pen-tool"),
+	RoundFolds = item("spline"),
+	SplitTiles = item("grid-2x2"),
+	SewTiles = item("link"),
+	StitchTiles = item("magnet"),
+	BakeTiles = item("package"),
+	UnbakeTiles = item("package-open"),
+	RebakeAll = item("refresh-cw"),
+	Noise = item("dices"),
+	ResetShape = item("fold-vertical"),
 	ClearPaint = item("eraser"),
-	SimplifyMode = item("triangle"),
+	FillHoles = item("puzzle"),
+	Unsimplify = item("waypoints"),
+	CreateArea = item("mountain"),
+	StartPickFaces = item("mouse-pointer-click"),
 	PaintMode = item("paintbrush"),
 	EraseMode = item("eraser"),
+	SimplifyMode = item("minimize-2"),
 	CutMode = item("scissors"),
-	RestoreHoles = item("rotate-ccw"),
-	RestorePoints = item("rotate-ccw"),
-	AutoSimplify = item("wand"),
 	ApplyMarks = item("check"),
-	ClearMarks = item("x"),
-	CopyAppearance = item("pipette"),
-	BakeAll = item("layers"),
-	SelectAll = item("box-select"),
-	Back = item("arrow-left"),
-	RoundFolds = item("radius"),
-	SplitTiles = item("grid-2x2"),
-	SewTiles = item("link-2"),
-	StitchTiles = item("magnet"),
-	BakeTiles = item("group"),
-	EditPoints = item("move"),
-	ResetShape = item("rotate-ccw"),
-	SelectAdjacent = item("expand"),
-	UnbakeTiles = item("ungroup"),
 
 	-- Dropdown items (14 px).
 	FacesTop = item("arrow-up"),

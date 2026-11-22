@@ -163,7 +163,7 @@ local function StatusBar(props: Props)
 			then e(
 				Tooltip,
 				{
-					Text = "**Cancel** baking.\n\n> Tiles already baked are kept.",
+					Text = "**Cancel** the current operation.\n\n> Work already finished is kept.",
 					AnchorPoint = Vector2.new(1, 0.5),
 					Position = UDim2.new(1, -2 - 2 * (BUTTON_SIZE + BUTTON_GAP), 0.5, 1),
 					Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),

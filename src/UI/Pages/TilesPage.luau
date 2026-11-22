@@ -1,7 +1,7 @@
 --!strict
 --[[
-	Selected tiles inspector and action page: detail level, base appearance, cleanup, shape and
-	edge actions, baking, and displacement noise.
+	Selected tiles inspector and action page: detail level, base appearance, actions, noise,
+	resets, and baking.
 ]]
 
 local Selection = game:GetService("Selection")
@@ -64,7 +64,7 @@ local function reportAppearance(count: number, hidden: number, what: string)
 		Status.post("warning", `The selected tiles already use {what}.`)
 	elseif hidden == count then
 		-- Saved, but paint covers every triangle, so nothing visible changed.
-		Status.post("warning", `Changed {Format.plural(count, "tile")} to {what}, but paint covers all of it. Clear paint to show it.`)
+		Status.post("warning", `Changed {Format.plural(count, "tile")} to {what}, but paint covers all of it. Use Clear paint under Reset to show it.`)
 	else
 		Status.post("success", `Changed {Format.plural(count, "tile")} to {what}.`)
 	end
@@ -125,8 +125,8 @@ local function variantRow(info: Query.SelectionInfo)
 	)
 end
 
--- Action grid button with a 14 px icon and tooltip. Labels name their target (e.g. "Sew tiles")
--- so Sew and Stitch stay clearly distinct.
+-- Action grid button with a 14 px icon and tooltip. Labels stay compact so every 2-column cell
+-- fits with its icon down to the minimum panel width.
 local function actionButton(
 	layoutOrder: number,
 	text: string,
@@ -212,7 +212,7 @@ local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 			layoutOrder,
 			"Nothing to bake",
 			bake,
-			"**Every triangle of these tiles is deleted**, so there is nothing to bake.\n\n> Restore holes to bring triangles back.",
+			"**Every triangle of these tiles is deleted**, so there is nothing to bake.\n\n> Use `Fill holes` under `Reset`.",
 			true,
 			Icons.BakeTiles
 		)
@@ -225,15 +225,36 @@ local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 		return Rows.button(layoutOrder, "Unbake", unbake, unbakeTip, false, Icons.UnbakeTiles)
 	end
 
+	local mixedBakeTip = `**Merge {Format.plural(unbaked, "unbaked tile")}** into 1 union each.\n\n`
+		.. "Materials and textures run smoothly across baked tiles."
+	local mixedUnbakeTip = `**Unbake {Format.plural(info.baked, "baked tile")}** into editable wedges.\n\n`
+		.. "> Painting a baked tile unbakes it automatically."
+
 	return Rows.grid(layoutOrder, 2, {
-		Bake = actionButton(1, `Bake ({unbaked})`, Icons.BakeTiles, false, bake, bakeTip, true),
-		Unbake = actionButton(2, `Unbake ({info.baked})`, Icons.UnbakeTiles, false, unbake, unbakeTip),
+		Bake = actionButton(1, "Bake", Icons.BakeTiles, false, bake, mixedBakeTip, true),
+		Unbake = actionButton(2, "Unbake", Icons.UnbakeTiles, false, unbake, mixedUnbakeTip),
 	})
 end
 
--- Renders applicable cleanup buttons (Clear paint, Restore holes, Restore points): a single
--- action spans full width with a descriptive label; multiple actions share a 2-column grid.
-local function cleanupRow(layoutOrder: number, info: Query.SelectionInfo)
+-- Collapsible section holding destructive resets in a fixed 2x2 grid so buttons never shift or
+-- leave an odd half-row as the selection changes. Hidden when no tile has edits to reset.
+local function resetSection(layoutOrder: number, info: Query.SelectionInfo)
+	if info.modified == 0 then
+		return nil
+	end
+
+	local function resetShape()
+		run(function ()
+			local count = Shape.reset()
+
+			if count == 0 then
+				Status.post("warning", "Those tiles are already flat.")
+			else
+				Status.post("success", `Reset shape on {Format.plural(count, "tile")}.`)
+			end
+		end)
+	end
+
 	local function clearPaint()
 		run(function ()
 			local count = Appearance.clearPaint()
@@ -241,75 +262,95 @@ local function cleanupRow(layoutOrder: number, info: Query.SelectionInfo)
 		end)
 	end
 
-	local function restoreHoles()
+	local function fillHoles()
 		run(function ()
 			local count = Appearance.restoreHoles()
-			Status.post("success", `Restored deleted triangles on {Format.plural(count, "tile")}.`)
+			Status.post("success", `Filled deleted triangles on {Format.plural(count, "tile")}.`)
 		end)
 	end
 
-	local function restorePoints()
+	local function unsimplify()
 		run(function ()
 			local count = MeshActions.restorePoints()
 			Status.post("success", `Restored removed points on {Format.plural(count, "tile")}.`)
 		end)
 	end
 
+	local noShape = info.shaped == 0
+	local noPaint = info.painted == 0
+	local noHoles = info.holes == 0
+	local noPoints = info.simplified == 0
+
+	local resetTip = "**Flatten selected tiles** back to their base quads.\n\n"
+		.. "Clears sculpting, rounding and noise. Painted materials, holes and removed points stay.\n\n"
+		.. (if noShape then "> Selected tiles are already flat." else "> `Ctrl + Z` undoes.")
 	local clearTip = "**Remove painted materials** from the selected tiles.\n\n"
 		.. "Painted areas go back to each tile's own look. Holes stay.\n\n"
-		.. "> Paint with the `Material` tool in the strip."
-	local restoreTip = "**Bring back deleted triangles** on the selected tiles.\n\n"
+		.. (if noPaint then "> No painted materials on the selected tiles." else "> Paint with the `Material` tool in the strip.")
+	local fillTip = "**Fill deleted triangles** on the selected tiles.\n\n"
 		.. "They come back in each tile's own look.\n\n"
-		.. "> Cut holes with the `Mesh` tool's `Cut holes` mode."
-	local pointsTip = "**Bring back removed points** on the selected tiles.\n\n"
+		.. (if noHoles then "> No deleted triangles on the selected tiles." else "> Cut holes with the `Mesh` tool's `Cut holes` mode.")
+	local unsimplifyTip = "**Restore removed points** on the selected tiles.\n\n"
 		.. "The full grid of triangles returns, on the surface as it is now.\n\n"
-		.. "> Remove points with the `Mesh` tool's `Simplify` mode."
+		.. (if noPoints then "> No removed points on the selected tiles." else "> Remove points with the `Mesh` tool's `Simplify` mode.")
 
-	type Action = { short: string, long: string, icon: Icons.Icon, run: () -> (), tip: string }
-	local actions: { Action } = {}
+	return Rows.collapsible(
+		layoutOrder,
+		"reset",
+		`Reset ({info.modified})`,
+		"**Reset edits** on the selected tiles.\n\n" .. "> Click to show or hide.",
+		{
+			Grid = Rows.grid(1, 2, {
+				ResetShape = actionButton(1, "Reset shape", Icons.ResetShape, noShape, resetShape, resetTip),
+				ClearPaint = actionButton(2, "Clear paint", Icons.ClearPaint, noPaint, clearPaint, clearTip),
+				FillHoles = actionButton(3, "Fill holes", Icons.FillHoles, noHoles, fillHoles, fillTip),
+				Unsimplify = actionButton(4, "Unsimplify", Icons.Unsimplify, noPoints, unsimplify, unsimplifyTip),
+			}),
+		}
+	)
+end
 
-	if info.painted > 0 then
-		table.insert(actions, { short = "Clear paint", long = "Clear painted materials", icon = Icons.ClearPaint, run = clearPaint, tip = clearTip })
-	end
+local function growSelection()
+	run(function ()
+		local current = Query.selectedModels()
+		local currentSet: { [Model]: true } = {}
 
-	if info.holes > 0 then
-		table.insert(actions, { short = "Restore holes", long = "Restore deleted triangles", icon = Icons.RestoreHoles, run = restoreHoles, tip = restoreTip })
-	end
+		for _, model in current do
+			currentSet[model] = true
+		end
 
-	if info.simplified > 0 then
-		table.insert(actions, { short = "Restore points", long = "Restore removed points", icon = Icons.RestorePoints, run = restorePoints, tip = pointsTip })
-	end
+		local toAdd: { Instance } = {}
 
-	if #actions == 0 then
-		return nil
-	elseif #actions == 1 then
-		local only = actions[1]
+		for _, model in Query.adjacentModels(current) do
+			if not currentSet[model] then
+				table.insert(toAdd, model)
+			end
+		end
 
-		return Rows.button(layoutOrder, only.long, only.run, only.tip, nil, only.icon)
-	end
-
-	local cells: { [string]: unknown } = {}
-
-	for i, action in actions do
-		cells[action.short] = actionButton(i, action.short, action.icon, false, action.run, action.tip)
-	end
-
-	return Rows.grid(layoutOrder, 2, cells)
+		if #toAdd == 0 then
+			Status.post("warning", "No adjacent tiles found.")
+		else
+			-- Use Selection:Add so selected normal parts (for Sew) and area containers stay intact.
+			Selection:Add(toAdd)
+			Status.post("success", `Added {Format.plural(#toAdd, "adjacent tile")} ({#current + #toAdd} selected).`)
+		end
+	end)
 end
 
 local function TilesPage(props: { settings: Settings.State, info: Query.SelectionInfo })
 	local settings = props.settings
 	local info = props.info
+	local summary = selectedText(info)
 
 	-- Properties first (matching Studio's Properties window), followed by actions.
 	return Rows.page({
 		Selected = Rows.value(
 			1,
 			"Selected",
-			selectedText(info),
+			summary,
 			nil,
-			"**Selected tiles** and how many are baked.\n\n"
-				.. "Selecting a `TerrainArea` or inner part selects its tiles.\n\n"
+			`**Selected**: {summary}\n\n`
+				.. "Selecting a terrain area or inner part selects its tiles.\n\n"
 				.. "> Extra parts in the selection are used by `Sew tiles`."
 		),
 
@@ -399,13 +440,36 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			end,
 		}),
 
-		-- Rendered only when selected tiles have paint, holes, or removed points.
-		Cleanup = cleanupRow(6, info),
+		ActionsHeading = Rows.section(6, "Actions"),
 
-		ActionsHeading = Rows.section(7, "Actions"),
+		Actions = Rows.grid(7, 2, {
+			AddNearby = actionButton(
+				1,
+				"Add nearby",
+				Icons.Select,
+				false,
+				growSelection,
+				"**Add adjacent tiles** to the selection.\n\n"
+					.. "Click again to grow further.\n\n"
+					.. "> Useful before `Round folds`, `Sew tiles` or `Bake`."
+			),
 
-		Actions = Rows.grid(8, 2, {
-			Round = actionButton(1, "Round folds", Icons.RoundFolds, info.count < 2, function ()
+			EditPoints = actionButton(
+				2,
+				"Edit points",
+				Icons.EditPoints,
+				false,
+				function ()
+					run(function ()
+						PointEditor.enter()
+					end)
+				end,
+				"**Move or remove points** with Studio's tools.\n\n"
+					.. "Puts a handle on every point of the selected tiles.\n\n"
+					.. "> Seams stay closed."
+			),
+
+			Round = actionButton(3, "Round folds", Icons.RoundFolds, info.count < 2, function ()
 				run(function ()
 					local count = Shape.round()
 
@@ -420,7 +484,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "> Example: select a cliff's top and side.\n"
 				.. "> Hammer: Subdivide."),
 
-			Split = actionButton(2, "Split 2x2", Icons.SplitTiles, info.splittable == 0, function ()
+			Split = actionButton(4, "Split 2x2", Icons.SplitTiles, info.splittable == 0, function ()
 				run(function ()
 					local count, skipped = Shape.split()
 					local note = if skipped > 0 then ` Skipped {Format.plural(skipped, "Low detail tile")}.` else ""
@@ -435,7 +499,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Medium or High tiles only; drops `Detail` one level.\n\n"
 				.. "> Example: split, then raise `Detail` on one quarter for a path."),
 
-			Sew = actionButton(3, "Sew tiles", Icons.SewTiles, info.count < 2 and info.parts == 0, function ()
+			Sew = actionButton(5, "Sew tiles", Icons.SewTiles, info.count < 2 and info.parts == 0, function ()
 				run(function ()
 					local count, warning = Edges.sewSelected()
 
@@ -451,78 +515,17 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Welds shared edges and corners.\n\n"
 				.. "> Also stitches to any selected normal parts."),
 
-			Stitch = actionButton(4, "Stitch parts", Icons.StitchTiles, false, function ()
+			Stitch = actionButton(6, "Stitch parts", Icons.StitchTiles, false, function ()
 				run(function ()
 					reportStitch(Edges.stitchSelected(), settings.stitchReach)
 				end)
 			end, "**Snap tile edges** onto nearby parts.\n\n"
 				.. `Matches block or wedge parts within {settings.stitchReach} st.\n\n`
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
-
-			EditPoints = actionButton(5, "Edit points", Icons.EditPoints, false, function ()
-				run(function ()
-					PointEditor.enter()
-				end)
-			end, "**Move or remove points** with Studio's tools.\n\n"
-				.. "Puts a handle on every point of the selected tiles.\n\n"
-				.. "> Seams stay closed."),
-
-			ResetShape = actionButton(6, "Reset shape", Icons.ResetShape, false, function ()
-				run(function ()
-					local count = Shape.reset()
-
-					if count == 0 then
-						Status.post("warning", "Those tiles are already flat.")
-					else
-						Status.post("success", `Reset shape on {Format.plural(count, "tile")}.`)
-					end
-				end)
-			end, "**Flatten selected tiles** back to their base quads.\n\n"
-				.. "Clears sculpting, rounding and noise. Painted materials, holes and removed points stay.\n\n"
-				.. "> `Ctrl + Z` undoes."),
 		}),
 
-		SelectAdjacent = Rows.button(
-			9,
-			"Select adjacent tiles",
-			function ()
-				run(function ()
-					local current = Query.selectedModels()
-					local currentSet: { [Model]: true } = {}
-
-					for _, model in current do
-						currentSet[model] = true
-					end
-
-					local toAdd: { Instance } = {}
-
-					for _, model in Query.adjacentModels(current) do
-						if not currentSet[model] then
-							table.insert(toAdd, model)
-						end
-					end
-
-					if #toAdd == 0 then
-						Status.post("warning", "No adjacent tiles found.")
-					else
-						-- Use Selection:Add so selected normal parts (for Sew) and TerrainArea containers stay intact.
-						Selection:Add(toAdd)
-						Status.post("success", `Added {Format.plural(#toAdd, "adjacent tile")} ({#current + #toAdd} selected).`)
-					end
-				end)
-			end,
-			"**Expand selection** to touching neighbor tiles.\n\n"
-				.. "Click again to grow further.\n\n"
-				.. "> Useful before `Round folds`, `Sew tiles` or `Bake`.",
-			false,
-			Icons.SelectAdjacent
-		),
-
-		BakeDivider = Rows.divider(10),
-		Bake = bakeRow(11, info),
-
 		Noise = Rows.collapsible(
-			12,
+			8,
 			"noise",
 			"Noise",
 			"**Add random bumps** to selected tiles.\n\n"
@@ -572,6 +575,10 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				),
 			}
 		),
+
+		Reset = resetSection(9, info),
+		BakeDivider = Rows.divider(10),
+		Bake = bakeRow(11, info),
 	})
 end
 

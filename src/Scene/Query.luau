@@ -43,6 +43,10 @@ export type SelectionInfo = {
 	holes: number,
 	-- Selected tiles with removed points.
 	simplified: number,
+	-- Selected tiles with sculpted or rounded displacement shape.
+	shaped: number,
+	-- Selected tiles with any resettable edit (shape, paint, holes, or removed points).
+	modified: number,
 	-- Selected tiles whose every shown triangle is deleted (nothing to bake).
 	empty: number,
 }
@@ -287,6 +291,22 @@ function Query.isSimplified(model: Model): boolean
 	return config ~= nil and config:GetAttribute("Removed") ~= nil
 end
 
+-- Checks saved attributes for any sculpted or rounded displacement shape without opening the tile.
+function Query.isShaped(model: Model): boolean
+	local config = model:FindFirstChild("DispData")
+
+	if not config then
+		return false
+	end
+
+	local elevation = config:GetAttribute("Elevation")
+
+	return (typeof(elevation) == "number" and math.abs(elevation) > 1e-4)
+		or config:GetAttribute("Subdiv") == true
+		or config:GetAttribute("Distances") ~= nil
+		or config:GetAttribute("Offsets") ~= nil
+end
+
 -- Checks saved attributes for any deleted triangle without opening the tile.
 function Query.hasHoles(model: Model): boolean
 	local digits = triLooksOf(model)
@@ -379,6 +399,8 @@ function Query.selectionInfo(): SelectionInfo
 	local painted = 0
 	local holes = 0
 	local simplified = 0
+	local shaped = 0
+	local modified = 0
 	local empty = 0
 
 	for index, model in models do
@@ -386,16 +408,29 @@ function Query.selectionInfo(): SelectionInfo
 			empty += 1
 		end
 
-		if Query.isPainted(model) then
+		local isPainted = Query.isPainted(model)
+		local hasHoles = Query.hasHoles(model)
+		local isSimplified = Query.isSimplified(model)
+		local isShaped = Query.isShaped(model)
+
+		if isPainted then
 			painted += 1
 		end
 
-		if Query.hasHoles(model) then
+		if hasHoles then
 			holes += 1
 		end
 
-		if Query.isSimplified(model) then
+		if isSimplified then
 			simplified += 1
+		end
+
+		if isShaped then
+			shaped += 1
+		end
+
+		if isPainted or hasHoles or isSimplified or isShaped then
+			modified += 1
 		end
 
 		local look = Query.appearanceOf(model)
@@ -445,6 +480,8 @@ function Query.selectionInfo(): SelectionInfo
 		painted = painted,
 		holes = holes,
 		simplified = simplified,
+		shaped = shaped,
+		modified = modified,
 		empty = empty,
 	}
 end

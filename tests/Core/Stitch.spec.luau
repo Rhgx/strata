@@ -65,6 +65,23 @@ describe("Stitch.match", function ()
 
 		expect(#result.matches).toBe(0)
 	end)
+
+	it("groups flush corner walls with Stitch.sheet along the floor normal and closes the corner", function ()
+		local tile = Tiles.flat(arena, Vector3.zero, 16, 2)
+		-- Two equal-height walls meeting flush at an inside corner (shared horizontal cap edge at z = 16.4).
+		local wallX = Tiles.block(arena, Vector3.new(-10, 0, 16.4), Vector3.new(18.5, 10, 18.4))
+		local wallZ = Tiles.block(arena, Vector3.new(16.5, 0, -10), Vector3.new(18.5, 10, 16.4))
+		local corner = Tiles.vertexAt(tile, Vector3.new(16, 0, 16)) :: number
+
+		local floorSheet = Stitch.sheet(wallZ, { wallX, wallZ }, Vector3.yAxis)
+		expect(#floorSheet).toBe(2)
+
+		local moves = Stitch.match({ tile }, floorSheet, REACH, true).moves[tile]
+		local target = moves and moves[corner]
+		expect(target).never.toBeNil()
+		expect(math.abs((target :: Vector3).X - 16.5)).toBeLessThan(1e-3)
+		expect(math.abs((target :: Vector3).Z - 16.4)).toBeLessThan(1e-3)
+	end)
 end)
 
 describe("Stitch.propagate", function ()
