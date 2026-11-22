@@ -252,7 +252,7 @@ end
 
 -- Collects one member list per handle for the edited tiles; returns nil when over MAX_HANDLES.
 local function collect(edited: { Opened }): ({ { Member } }?, number)
-	local all = Session.getAll(Session.models())
+	local all = Session.flatNeighbors(edited, 1)
 	local twinsOf = Edges.seamTwins(all)
 	local groups: { { Member } } = {}
 	local groupOf: { [Opened]: { [number]: { Member } } } = {}

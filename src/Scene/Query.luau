@@ -8,7 +8,6 @@
 ]]
 
 local Selection = game:GetService("Selection")
-local CollectionService = game:GetService("CollectionService")
 
 local Plugin = script.Parent.Parent
 local Core = Plugin.Core
@@ -63,17 +62,7 @@ local Query = {}
 
 -- Returns the displacement Model that is or contains `inst`, if any.
 function Query.displacementOf(inst: Instance): Model?
-	local node: Instance? = inst
-
-	while node do
-		if node:IsA("Model") and CollectionService:HasTag(node, TerrainInstance.TAG) then
-			return node
-		end
-
-		node = node.Parent
-	end
-
-	return nil
+	return TerrainInstance.of(inst)
 end
 
 function Query.selectedModels(): { Model }
@@ -177,19 +166,9 @@ end
 
 -- Returns opened displacements within `pad` studs of `part`.
 function Query.tilesNear(part: BasePart, pad: number): { Opened }
-	local include: { Instance } = {}
-
-	for _, model in Session.models() do
-		table.insert(include, model)
-	end
-
-	local params = OverlapParams.new()
-	params.FilterType = Enum.RaycastFilterType.Include
-	params.FilterDescendantsInstances = include
-
 	local found: { [Model]: true } = {}
 
-	for _, hit in workspace:GetPartBoundsInBox(part.CFrame, part.Size + Vector3.one * pad * 2, params) do
+	for _, hit in workspace:GetPartBoundsInBox(part.CFrame, part.Size + Vector3.one * pad * 2) do
 		local model = Query.displacementOf(hit)
 
 		if model then
@@ -204,6 +183,87 @@ function Query.tilesNear(part: BasePart, pad: number): { Opened }
 	end
 
 	return Session.getAll(models)
+end
+
+-- Distance from point `p` to line segment `a..b`.
+local function pointToSegment(p: Vector3, a: Vector3, b: Vector3): number
+	local ab = b - a
+	local len2 = ab:Dot(ab)
+
+	if len2 < 1e-9 then
+		return (p - a).Magnitude
+	end
+
+	local t = math.clamp((p - a):Dot(ab) / len2, 0, 1)
+
+	return (p - (a + ab * t)).Magnitude
+end
+
+-- Returns whether two flat quads share a corner, edge, or 2:1 T-junction within `tolerance`.
+local function quadsTouch(a: { Vector3 }, b: { Vector3 }, tolerance: number): boolean
+	for _, p in a do
+		for i = 1, 4 do
+			if pointToSegment(p, b[i], b[i % 4 + 1]) <= tolerance then
+				return true
+			end
+		end
+	end
+
+	for _, p in b do
+		for i = 1, 4 do
+			if pointToSegment(p, a[i], a[i % 4 + 1]) <= tolerance then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+local function worldCorners(opened: Opened): { Vector3 }
+	local pivot = opened.model:GetPivot()
+	local c = opened.disp.corners
+
+	return { pivot * c[1], pivot * c[2], pivot * c[3], pivot * c[4] }
+end
+
+-- Returns the selected displacements plus any immediately touching neighbor displacements
+-- (verified by flat base edge/corner adjacency so disconnected tiles inside a slope's AABB are
+-- never included).
+function Query.adjacentModels(models: { Model }): { Model }
+	if #models == 0 then
+		return {}
+	end
+
+	local tolerance = 0.25
+	local selectedTiles = Session.getAll(models)
+	local selectedCorners: { { Vector3 } } = table.create(#selectedTiles)
+	local selectedSet: { [Model]: true } = {}
+	local result: { Model } = {}
+
+	for i, opened in selectedTiles do
+		selectedCorners[i] = worldCorners(opened)
+		selectedSet[opened.model] = true
+		table.insert(result, opened.model)
+	end
+
+	for _, candidate in Session.flatNeighbors(selectedTiles, tolerance) do
+		if selectedSet[candidate.model] then
+			continue
+		end
+
+		local candidateCorners = worldCorners(candidate)
+
+		for _, corners in selectedCorners do
+			if quadsTouch(corners, candidateCorners, tolerance) then
+				selectedSet[candidate.model] = true
+				table.insert(result, candidate.model)
+				break
+			end
+		end
+	end
+
+	return result
 end
 
 local function triLooksOf(model: Model): string?

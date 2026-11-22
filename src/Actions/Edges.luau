@@ -41,8 +41,20 @@ local PIN_REACH = 0.1
 -- Sew's corner tolerance). Points are bucketed in 1-stud cells and checked across 3x3x3
 -- neighboring cells so points near cell boundaries still find their twins.
 local TWIN_DISTANCE = 1 / 16
+-- Spatial padding in studs when gathering neighboring tiles for sewing and seam propagation.
+local NEIGHBOR_PAD = 1
 
 local Edges = {}
+
+local function tilesOfMoves(moves: Stitch.Moves): { Opened }
+	local list: { Opened } = {}
+
+	for opened in moves do
+		table.insert(list, opened)
+	end
+
+	return list
+end
 
 local function count<K>(set: { [K]: true }): number
 	local n = 0
@@ -66,7 +78,7 @@ end
 -- `keepRemoved` is for closing seams, whose moves are removed points by design; every other
 -- caller moves points onto parts, where a removed point must come back to stay put.
 local function applyMoves(moves: Stitch.Moves, keepRemoved: boolean?): (Stitch.Changes, { Opened })
-	local all = Stitch.propagate(moves, Session.getAll(Session.models()))
+	local all = Stitch.propagate(moves, Session.flatNeighbors(tilesOfMoves(moves), NEIGHBOR_PAD))
 	local changes = Stitch.write(all)
 	local changed: { Opened } = {}
 
@@ -137,7 +149,7 @@ function Edges.propagatePins(pins: Stitch.Moves): Stitch.Moves
 		return {}
 	end
 
-	return Stitch.propagate(pins, Session.getAll(Session.models()))
+	return Stitch.propagate(pins, Session.flatNeighbors(tilesOfMoves(pins), NEIGHBOR_PAD))
 end
 
 -- Re-snaps pinned edges onto their parts and updates wedges. Caller is responsible for saving.
@@ -299,7 +311,9 @@ function Edges.autosew(focus: { Opened }, pins: Stitch.Moves?)
 		focusSet[opened] = true
 	end
 
-	applySew((Sew.sew(Session.getAll(Session.models()), focusSet)))
+	local nearby = Session.flatNeighbors(focus, NEIGHBOR_PAD)
+
+	applySew((Sew.sew(nearby, focusSet)))
 
 	if pinned then
 		for _, opened in Edges.restorePins(pinned) do
@@ -309,7 +323,7 @@ function Edges.autosew(focus: { Opened }, pins: Stitch.Moves?)
 
 	-- Sewing averages seam vertices, which can pull a neighbor's vertex off an edge that a
 	-- simplified tile renders straight.
-	for _, opened in Edges.closeRemovedSeams(Session.getAll(Session.models())) do
+	for _, opened in Edges.closeRemovedSeams(nearby) do
 		TerrainInstance.save(opened)
 	end
 end

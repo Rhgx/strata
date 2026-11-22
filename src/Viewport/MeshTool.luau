@@ -6,7 +6,7 @@
 	Simplify mode stages edits before committing (like Blender's select-then-dissolve) so
 	sweeping never mutates terrain unintentionally:
 	- Drag marks points for removal (orange); Ctrl + Drag marks removed points for restoration
-	  (green), and either drag unmarks opposite marks.
+	  (blue), and either drag unmarks opposite marks.
 	- Click without dragging toggles the single nearest vertex.
 	- Marked tiles draw bright preview edges for the resulting triangulation while the panel
 	  shows before/after triangle counts.
@@ -63,7 +63,8 @@ local TriangleOutline = require(Viewport.TriangleOutline)
 type Opened = TerrainInstance.Opened
 
 local REMOVE_COLOR = Color3.fromRGB(230, 96, 80)
-local RESTORE_COLOR = Color3.fromRGB(96, 200, 120)
+-- Blue rather than green so Cut/Remove (red/orange) vs Restore stays clear for red-green colorblindness.
+local RESTORE_COLOR = Color3.fromRGB(70, 175, 255)
 local MARK_COLOR = Color3.fromRGB(255, 150, 40)
 local WIRE_COLOR = Color3.fromRGB(235, 235, 235)
 local KEPT_COLOR = Color3.fromRGB(235, 235, 235)

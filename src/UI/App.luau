@@ -52,10 +52,8 @@ type Context = {
 	place: Query.PlaceInfo,
 }
 
-local function context(settings: Settings.State): Context
-	local info = Query.selectionInfo()
+local function context(settings: Settings.State, info: Query.SelectionInfo, place: Query.PlaceInfo): Context
 	local parts = info.parts
-	local place = Query.placeInfo()
 	local page: Page = "overview"
 
 	if settings.overlay == "settings" then
@@ -173,11 +171,19 @@ end
 
 local function App()
 	local settings = useSettings()
-	useRefresh()
-
-	local ctx = context(settings)
+	local refreshVersion = useRefresh()
 	local active = Settings.activeTool(settings)
 	local overlayOpen = settings.overlay ~= "none"
+
+	-- Memoize scene scans so brush slider ticks and Alt + Drag resizes do not re-scan every tile.
+	local scene = React.useMemo(function ()
+		return {
+			info = Query.selectionInfo(),
+			place = Query.placeInfo(),
+		}
+	end, { refreshVersion, active, settings.editingPoints } :: { unknown })
+
+	local ctx = context(settings, scene.info, scene.place)
 
 	-- Clear prior status messages when starting a tool, while keeping them across selection-driven
 	-- page transitions (for example, Create selects the newly built tiles right after reporting).

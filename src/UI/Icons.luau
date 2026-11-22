@@ -79,6 +79,8 @@ return table.freeze({
 	StitchTiles = item("magnet"),
 	BakeTiles = item("group"),
 	EditPoints = item("move"),
+	ResetShape = item("rotate-ccw"),
+	SelectAdjacent = item("expand"),
 	UnbakeTiles = item("ungroup"),
 
 	-- Dropdown items (14 px).

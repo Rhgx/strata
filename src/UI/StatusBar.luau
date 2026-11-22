@@ -16,6 +16,8 @@ local StudioComponents = require(Packages.StudioComponents)
 local Status = require(State.Status)
 local Settings = require(State.Settings)
 
+local Session = require(Plugin.Scene.Session)
+
 local Icons = require(UI.Icons)
 local Accent = require(UI.Accent)
 local Tooltip = require(UI.Tooltip)
@@ -87,6 +89,18 @@ local function StatusBar(props: Props)
 	local message = useStatus()
 	local text = if message then message.text else props.idle
 	local color = if message then KIND_COLORS[message.kind] else Enum.StudioStyleGuideColor.DimmedText
+	local onCancel = if message and message.onCancel
+		then message.onCancel
+		elseif Session.isCancellableBake() then Session.cancelBake
+		else nil
+	local dismissable = message ~= nil and message.kind ~= "progress"
+	local rightButtons = if onCancel then 3 else 2
+
+	React.useEffect(function ()
+		return function ()
+			Status.setPaused(false)
+		end
+	end, {})
 
 	return e("Frame", {
 		AnchorPoint = Vector2.new(0, 1),
@@ -104,12 +118,21 @@ local function StatusBar(props: Props)
 		Message = e(
 			Tooltip,
 			{
-				Text = if message then `{text}\n\n> Click to dismiss.` else text,
-				Size = UDim2.new(1, -(BUTTON_SIZE * 2 + BUTTON_GAP + 12), 1, -1),
+				Text = if dismissable then `{text}\n\n> Click to dismiss.` else text,
+				Size = UDim2.new(1, -(BUTTON_SIZE * rightButtons + BUTTON_GAP * (rightButtons - 1) + 12), 1, -1),
 			},
 			e("Frame", {
 				Size = UDim2.fromScale(1, 1),
 				BackgroundTransparency = 1,
+
+				-- Pause auto-expiration while hovered so truncated warnings do not vanish mid-read.
+				[React.Event.MouseEnter] = function ()
+					Status.setPaused(true)
+				end,
+
+				[React.Event.MouseLeave] = function ()
+					Status.setPaused(false)
+				end,
 			}, {
 				Label = e(StudioComponents.Label, {
 					Position = UDim2.fromOffset(7, 1),
@@ -122,7 +145,7 @@ local function StatusBar(props: Props)
 				}),
 
 				-- Clicking a posted message dismisses it early (errors otherwise persist until replaced).
-				Dismiss = if message
+				Dismiss = if dismissable
 					then e("TextButton", {
 						Size = UDim2.fromScale(1, 1),
 						BackgroundTransparency = 1,
@@ -135,6 +158,23 @@ local function StatusBar(props: Props)
 					else nil,
 			})
 		),
+
+		Cancel = if onCancel
+			then e(
+				Tooltip,
+				{
+					Text = "**Cancel** baking.\n\n> Tiles already baked are kept.",
+					AnchorPoint = Vector2.new(1, 0.5),
+					Position = UDim2.new(1, -2 - 2 * (BUTTON_SIZE + BUTTON_GAP), 0.5, 1),
+					Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),
+				},
+				e(StudioComponents.Button, {
+					Size = UDim2.fromScale(1, 1),
+					Icon = Icons.Clear,
+					OnActivated = onCancel,
+				})
+			)
+			else nil,
 
 		Settings = overlayButton(1, Icons.Settings, "settings", props.overlay, "**Settings**", "**Close settings** (`Esc`)."),
 		Help = overlayButton(0, Icons.Help, "help", props.overlay, "**Help** and shortcuts", "**Close help** (`Esc`)."),

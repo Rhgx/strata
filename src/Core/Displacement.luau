@@ -1374,4 +1374,38 @@ function Displacement.load(config: Configuration): Displacement
 	}
 end
 
+-- Flattens `disp` back to its base quad: clears elevation, subdiv, field vectors, and offsets
+-- while preserving corners, power, appearance, painted looks, holes, and removed points.
+-- Returns whether anything actually changed.
+function Displacement.resetShape(disp: Displacement): boolean
+	local count = disp.size * disp.size
+	local changed = math.abs(disp.elevation) > 1e-4 or disp.subdiv
+
+	if not changed then
+		for v = 1, count do
+			if disp.distances[v] > 1e-4 or disp.offsets[v].Magnitude > 1e-4 then
+				changed = true
+				break
+			end
+		end
+	end
+
+	if not changed then
+		return false
+	end
+
+	local faceNormal = computeFaceNormal(disp.corners)
+	disp.elevation = 0
+	disp.subdiv = false
+
+	for v = 1, count do
+		disp.normals[v] = Vector3.zero
+		disp.distances[v] = 0
+		disp.offsets[v] = Vector3.zero
+		disp.offsetNormals[v] = faceNormal
+	end
+
+	return true
+end
+
 return Displacement

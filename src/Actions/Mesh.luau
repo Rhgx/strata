@@ -190,12 +190,14 @@ end
 local function applyPointMarks(marked: { [Opened]: { [number]: MeshStage.Mark } }): (number, number)
 	local tiles, points = 0, 0
 	local userTiles: { [Opened]: true } = {}
+	local markedList: { Opened } = {}
 
 	for opened in marked do
 		userTiles[opened] = true
+		table.insert(markedList, opened)
 	end
 
-	local twinsOf = Edges.seamTwins(Session.getAll(Session.models()))
+	local twinsOf = Edges.seamTwins(Session.flatNeighbors(markedList, 1))
 	mirrorAcrossSeams(marked, twinsOf)
 
 	local changedSet: { [Opened]: true } = {}

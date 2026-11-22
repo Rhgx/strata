@@ -182,19 +182,20 @@ function Appearance.apply(change: Change, name: string): (number, number)
 			local look = plan.look
 			local config = plan.model:FindFirstChild("DispData")
 
-			if config then
-				config:SetAttribute("Material", look.material.Name)
-				config:SetAttribute("Color", look.color)
-				config:SetAttribute("MaterialVariant", if look.variant == "" then nil else look.variant)
-			end
-
-			-- Keep any cached in-memory copy synchronized for future rebuilds or bakes.
 			local opened = Session.peek(plan.model)
 
 			if opened then
 				opened.disp.material = look.material
 				opened.disp.color = look.color
 				opened.disp.materialVariant = look.variant
+			end
+
+			if config and config:IsA("Configuration") then
+				TerrainInstance.writeConfig(config, opened, function ()
+					config:SetAttribute("Material", look.material.Name)
+					config:SetAttribute("Color", look.color)
+					config:SetAttribute("MaterialVariant", if look.variant == "" then nil else look.variant)
+				end)
 			end
 
 			local parts = partsOf(plan.model)

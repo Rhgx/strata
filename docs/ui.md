@@ -138,8 +138,8 @@ Drags track pointer movement through a transparent full-widget overlay button (t
 
 ## Viewport cursors and radius preview
 
-- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). When the ring holds no point, it dims. Turning on `Settings > Interface > Show brush dots` (off by default) also draws always-on-top dots on every kept point inside the ring, more solid where the brush pushes harder (hidden above 64 points), and faint dots on up to 4 nearest points when the ring is empty.
-- **`Material` and `Mesh` (`Cut holes`)**: `TriangleOutline` traces the outer edges of the exact shown triangles a click will modify (blue to paint, red to erase or cut, green to restore).
+- **Sculpt brushes**: a single radius ring on the surface at the real radius (paired with a faint always-on-top copy so it stays readable in valleys). When the ring holds no point (or every hit point is pinned during a drag), it dims and shows `Pinned` mid-stroke; holding `Ctrl` or `Shift` shows the overridden mode name next to the cursor; and `X`, `Z`, and `Picked` axes draw a 3D direction arrow at the cursor. Turning on `Settings > Interface > Show brush dots` (off by default) also draws always-on-top dots on every kept point inside the ring, more solid where the brush pushes harder (hidden above 64 points), and faint dots on up to 4 nearest points when the ring is empty.
+- **`Material` and `Mesh` (`Cut holes`)**: `TriangleOutline` traces the outer edges of the exact shown triangles a click will modify (blue to paint or restore, red to erase or cut).
 - **`Mesh` (`Simplify`)**: highlights the points a click or drag will remove or restore over a wireframe of the hovered tile, including the nearest point a click always toggles.
 - **`Stitch` and `Pick faces`**: highlight candidate parts, edges, and faces.
 - **Mouse icons (`Viewport/Cursor`, `Viewport/Activation`)**: `Wait` while baking, `SizeEW` during `Alt + Drag` resize, `Forbidden` when no targets exist, `Cross` for brush tools, and `PointingHand` / `Arrow` for click tools based on hover validity.

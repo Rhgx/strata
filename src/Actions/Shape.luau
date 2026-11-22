@@ -142,6 +142,7 @@ function Shape.setDetail(power: number): number
 			-- Preserve appearance edits made with Studio tools before removing the union.
 			TerrainInstance.adoptAppearance(opened)
 			TerrainInstance.removeSurfaces(opened.model)
+			TerrainInstance.ensureTris(opened)
 
 			before[opened] = opened.disp
 			opened.disp = Displacement.changePower(opened.disp, power)
@@ -339,6 +340,53 @@ function Shape.split(): (number, number)
 
 	Selection:Set(models)
 	return #splittable, skipped
+end
+
+-- Flattens selected displacements back to their base quads, keeping paint, holes, and removed
+-- points intact, and re-sews/re-pins shared edges. Returns how many tiles changed.
+function Shape.reset(): number
+	local targets = Query.selectedTiles()
+
+	if #targets == 0 then
+		return 0
+	end
+
+	local count = 0
+
+	Recording.run("Strata reset shape", function ()
+		local settings = Settings.get()
+		local pins = if settings.stitchParts then Edges.pinsFor(targets) else {}
+		local changedTiles: { Opened } = {}
+
+		for _, opened in targets do
+			if Displacement.resetShape(opened.disp) then
+				local allVertices: { [number]: true } = {}
+
+				for v = 1, Displacement.vertexCount(opened.disp) do
+					allVertices[v] = true
+				end
+
+				Session.updateWedges(opened, allVertices)
+				TerrainInstance.save(opened)
+				table.insert(changedTiles, opened)
+				count += 1
+			end
+		end
+
+		if count > 0 then
+			if settings.autosew then
+				Edges.autosew(changedTiles, pins)
+			else
+				for _, opened in Edges.restorePins(pins) do
+					TerrainInstance.save(opened)
+				end
+			end
+
+			Recording.autoBake()
+		end
+	end)
+
+	return count
 end
 
 return Shape

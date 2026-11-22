@@ -83,7 +83,7 @@ local function BrushPage(props: { settings: Settings.State })
 				RadiusPreview.pulse()
 			end),
 			"**Brush size** in studs.\n\n"
-				.. "Only points inside the ring move, shown as dots. Between points, the ring dims and shows the nearest points instead of moving anything. Use a finer grid (`Detail`, or `Split 2x2` then `Detail`) for more points.\n\n"
+				.. "Only points inside the ring move. Between points, the ring dims instead of moving anything (turn on `Show brush dots` in `Settings` to mark points). Use a finer grid (`Detail`, or `Split 2x2` then `Detail`) for more points.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
 

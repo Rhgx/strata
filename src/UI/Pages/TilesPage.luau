@@ -4,6 +4,8 @@
 	edge actions, baking, and displacement noise.
 ]]
 
+local Selection = game:GetService("Selection")
+
 local UI = script.Parent.Parent
 local Plugin = UI.Parent
 local State = Plugin.State
@@ -449,28 +451,71 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "Welds shared edges and corners.\n\n"
 				.. "> Also stitches to any selected normal parts."),
 
-			Stitch = actionButton(4, "Stitch", Icons.StitchTiles, false, function ()
+			Stitch = actionButton(4, "Stitch parts", Icons.StitchTiles, false, function ()
 				run(function ()
 					reportStitch(Edges.stitchSelected(), settings.stitchReach)
 				end)
 			end, "**Snap tile edges** onto nearby parts.\n\n"
 				.. `Matches block or wedge parts within {settings.stitchReach} st.\n\n`
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
-		}),
 
-		EditPoints = Rows.button(
-			9,
-			"Edit points",
-			function ()
+			EditPoints = actionButton(5, "Edit points", Icons.EditPoints, false, function ()
 				run(function ()
 					PointEditor.enter()
 				end)
-			end,
-			"**Move or remove points** with Studio's tools.\n\n"
+			end, "**Move or remove points** with Studio's tools.\n\n"
 				.. "Puts a handle on every point of the selected tiles.\n\n"
-				.. "> Seams stay closed.",
+				.. "> Seams stay closed."),
+
+			ResetShape = actionButton(6, "Reset shape", Icons.ResetShape, false, function ()
+				run(function ()
+					local count = Shape.reset()
+
+					if count == 0 then
+						Status.post("warning", "Those tiles are already flat.")
+					else
+						Status.post("success", `Reset shape on {Format.plural(count, "tile")}.`)
+					end
+				end)
+			end, "**Flatten selected tiles** back to their base quads.\n\n"
+				.. "Clears sculpting, rounding and noise. Painted materials, holes and removed points stay.\n\n"
+				.. "> `Ctrl + Z` undoes."),
+		}),
+
+		SelectAdjacent = Rows.button(
+			9,
+			"Select adjacent tiles",
+			function ()
+				run(function ()
+					local current = Query.selectedModels()
+					local currentSet: { [Model]: true } = {}
+
+					for _, model in current do
+						currentSet[model] = true
+					end
+
+					local toAdd: { Instance } = {}
+
+					for _, model in Query.adjacentModels(current) do
+						if not currentSet[model] then
+							table.insert(toAdd, model)
+						end
+					end
+
+					if #toAdd == 0 then
+						Status.post("warning", "No adjacent tiles found.")
+					else
+						-- Use Selection:Add so selected normal parts (for Sew) and TerrainArea containers stay intact.
+						Selection:Add(toAdd)
+						Status.post("success", `Added {Format.plural(#toAdd, "adjacent tile")} ({#current + #toAdd} selected).`)
+					end
+				end)
+			end,
+			"**Expand selection** to touching neighbor tiles.\n\n"
+				.. "Click again to grow further.\n\n"
+				.. "> Useful before `Round folds`, `Sew tiles` or `Bake`.",
 			false,
-			Icons.EditPoints
+			Icons.SelectAdjacent
 		),
 
 		BakeDivider = Rows.divider(10),

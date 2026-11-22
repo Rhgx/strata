@@ -46,7 +46,7 @@ Shared stores outside React so per-frame viewport tools read tool state directly
 | --- | --- |
 | `Settings.luau` | Frozen `State` table with `get`, `update`, `subscribe`, `toggleTool`, `stopViewportTool`, `setEditingPoints`, `setOverlay`, `stepRadius`, and `stepReach`. Clamps numeric bounds and enforces mutual exclusion across the six mouse-owning modes (`painting`, `coloring`, `meshing`, `picking`, `stitching`, `sampling`) and `editingPoints`, which never takes the mouse and so is left running when Studio's own tools take it back. |
 | `KeyCapture.luau` | Tracks panel keyboard focus (such as an open `Dropdown`). While held, `Input.onKey` yields keys to the panel so `Esc` closes a list without stopping the active tool and `Enter` picks an item without triggering a viewport action. |
-| `Status.luau` | Latest operation status (`success`, `warning`, `error`, or progress) for the status bar. `success` and `warning` expire after 6 seconds; `error` stays until dismissed or replaced. |
+| `Status.luau` | Latest operation status (`success`, `warning`, `error`, or `progress` with optional cancel callback) for the status bar. `success` expires after 6 seconds and `warning` after 10 seconds (both pause while hovering the status bar); `error` stays until dismissed or replaced. |
 | `Format.luau` | Shared formatting helpers for panel labels, status messages, and 3D overlays: comma-grouped counts, plurals, stud lengths (`Format.studs`), and color hex / `"R, G, B"` parsing. |
 
 ### `src/Scene`
@@ -55,7 +55,7 @@ Live place state and read-only scene queries.
 
 | Module | Responsibility |
 | --- | --- |
-| `Session.luau` | Caches opened `TerrainInstance.Opened` handles per `Model`, tracks `dirty` tiles edited since their last bake, provides `updateWedges`, `updateMoved` (restores removed points moved by exact edits such as `Stitch` and `Round`), `bake`, and `bakeDirty`, and invalidates its cache on `ChangeHistoryService.OnUndo`, `OnRedo`, and `StrataDisplacement` tag removal. |
+| `Session.luau` | Caches opened `TerrainInstance.Opened` handles per `Model`, provides spatial lookup helpers (`nearRadius`, `flatNeighbors`), tracks `dirty` tiles edited since their last bake with an `onChanged` signal, provides `updateWedges`, `updateMoved` (restores removed points moved by exact edits such as `Stitch` and `Round`), cancellable `bake` (including per-tile `rebake`), and `bakeDirty`, and validates cached handles per model on `ChangeHistoryService.OnUndo`/`OnRedo` (via `DispData`'s session-unique `Rev` attribute) and direct `DispData` attribute edits instead of clearing the whole cache. |
 | `Query.luau` | Read-only selection and spatial queries: `workingModels` (selected tiles when `Selected only` is on, otherwise all tiles), `displacementOf`, `selectedModels`, `selectedTiles`, `selectedParts`, `touchingParts`, `tilesNear`, `appearanceOf`, `selectionInfo`, and `placeInfo`. Resolves selections from a `TerrainArea` container, a tile model, or any child wedge/union. |
 | `MeshStage.luau` | Holds points staged in the Mesh tool's `Simplify` mode before `Apply`, with a cached preview triangulation per tile and before/after triangle counts. Clears on undo, redo, mode change, or tool stop. |
 

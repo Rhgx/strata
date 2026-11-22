@@ -113,4 +113,27 @@ describe("Displacement", function ()
 			end
 		end
 	end)
+
+	it("resets sculpted shape back to flat while keeping holes and removed points", function ()
+		local tile = Tiles.flat(arena, Vector3.zero, 16, 3)
+		Tiles.move(tile, 20, Vector3.new(6, 3.5, 4))
+		tile.disp.offsets[25] = Vector3.new(0, 1.5, 0)
+		tile.disp.elevation = 2
+		tile.disp.subdiv = true
+		tile.disp.triLooks[5] = Displacement.HOLE
+		Displacement.setRemoved(tile.disp, 41, true)
+
+		expect(Displacement.resetShape(tile.disp)).toBe(true)
+		expect(tile.disp.elevation).toBe(0)
+		expect(tile.disp.subdiv).toBe(false)
+		expect(tile.disp.triLooks[5]).toBe(Displacement.HOLE)
+		expect(tile.disp.removed[41]).toBe(true)
+
+		for v = 1, Displacement.vertexCount(tile.disp) do
+			expect((Displacement.position(tile.disp, v) - Displacement.flatPosition(tile.disp, v)).Magnitude).toBeLessThan(1e-4)
+		end
+
+		-- Resetting an already-flat tile is a no-op.
+		expect(Displacement.resetShape(tile.disp)).toBe(false)
+	end)
 end)

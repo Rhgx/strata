@@ -32,6 +32,7 @@
 ]]
 
 local CoreGui = game:GetService("CoreGui")
+local Selection = game:GetService("Selection")
 local RunService = game:GetService("RunService")
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
 
@@ -192,13 +193,56 @@ return function (plugin: Plugin): () -> ()
 	local resize: Input.DragResize? = nil
 	-- Whether the current stroke reached points removed by the Mesh tool (see endStroke).
 	local strokeReachedRemoved = false
+	-- True during a drag frame when every vertex Paint moved was pinned back by Keep edges stitched.
+	local framePinned = false
+	local strokeVersion = 0
+	local selectionVersion = 0
 	local wasPainting = false
+
+	-- Cached RaycastParams for hover frames (when no stroke snapshots are active).
+	local cachedFilterModels: { Model } = {}
+	local cachedRaycastParams: RaycastParams? = nil
+
+	type PreviewCache = {
+		opened: Opened,
+		disp: Displacement.Displacement,
+		position: Vector3,
+		radius: number,
+		mode: Paint.Effect,
+		falloff: Paint.Falloff,
+		showDots: boolean,
+		selectedOnly: boolean,
+		selectionVersion: number,
+		gen: number,
+		strokeVersion: number,
+		result: Paint.Preview?,
+	}
+	local previewCache: PreviewCache? = nil
 
 	-- Depth-tested primary ring plus a faint always-on-top ghost ring so the cursor stays
 	-- legible inside valleys while reading as a single circle.
 	local ring = RadiusPreview.newRing("StrataBrushCursor", false, 0.2)
 	local ghost = RadiusPreview.newRing("StrataBrushGhost", true, 0.78)
 	local keyStrip = KeyStrip.new("StrataKeyHints")
+
+	-- Subtle 3D axis arrow shown at the brush center for custom world axes (X, Z, Picked).
+	local axisShaft = Instance.new("CylinderHandleAdornment")
+	axisShaft.Name = "StrataAxisShaft"
+	axisShaft.Adornee = workspace.Terrain
+	axisShaft.AlwaysOnTop = true
+	axisShaft.ZIndex = 4
+	axisShaft.Transparency = 0.25
+	axisShaft.Visible = false
+	axisShaft.Parent = CoreGui
+
+	local axisHead = Instance.new("ConeHandleAdornment")
+	axisHead.Name = "StrataAxisHead"
+	axisHead.Adornee = workspace.Terrain
+	axisHead.AlwaysOnTop = true
+	axisHead.ZIndex = 4
+	axisHead.Transparency = 0.15
+	axisHead.Visible = false
+	axisHead.Parent = CoreGui
 
 	-- Dots on the points the brush would move (and, when it holds none, faint dots on the nearest
 	-- points to aim at), drawn on top so they are never hidden by the terrain.
@@ -210,11 +254,31 @@ return function (plugin: Plugin): () -> ()
 		end
 	end
 
+	local function hideAxisArrow()
+		axisShaft.Visible = false
+		axisHead.Visible = false
+	end
+
 	local function hideCursor()
 		ring.Visible = false
 		ghost.Visible = false
+		hideAxisArrow()
 		hideDots(1)
 		RadiusPreview.label(nil)
+	end
+
+	local function sameModels(a: { Model }, b: { Model }): boolean
+		if #a ~= #b then
+			return false
+		end
+
+		for i = 1, #a do
+			if a[i] ~= b[i] then
+				return false
+			end
+		end
+
+		return true
 	end
 
 	-- Raycasts against stroke snapshots for reached tiles and live parts for unreached tiles,
@@ -222,24 +286,44 @@ return function (plugin: Plugin): () -> ()
 	local function findHit(models: { Model }, aim: Ray?): Hit?
 		local ray = aim or mouse.UnitRay
 		local direction = ray.Direction.Unit
-		local filter: { Instance } = {}
-
-		for _, model in models do
-			-- Peek rather than get so hovering does not open every tile in the place.
-			local opened = Session.peek(model)
-
-			if not (opened and snapshots[opened]) then
-				table.insert(filter, model)
-			end
-		end
-
 		local live: RaycastResult? = nil
 
-		if #filter > 0 then
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Include
-			params.FilterDescendantsInstances = filter
-			live = workspace:Raycast(ray.Origin, direction * RAY_LENGTH, params)
+		if #snapshotList == 0 then
+			if #models > 0 then
+				if not cachedRaycastParams or not sameModels(models, cachedFilterModels) then
+					local filter: { Instance } = table.create(#models)
+
+					for i, model in models do
+						filter[i] = model
+					end
+
+					local params = RaycastParams.new()
+					params.FilterType = Enum.RaycastFilterType.Include
+					params.FilterDescendantsInstances = filter
+					cachedFilterModels = models
+					cachedRaycastParams = params
+				end
+
+				live = workspace:Raycast(ray.Origin, direction * RAY_LENGTH, cachedRaycastParams)
+			end
+		else
+			local filter: { Instance } = {}
+
+			for _, model in models do
+				-- Peek rather than get so hovering does not open every tile in the place.
+				local opened = Session.peek(model)
+
+				if not (opened and snapshots[opened]) then
+					table.insert(filter, model)
+				end
+			end
+
+			if #filter > 0 then
+				local params = RaycastParams.new()
+				params.FilterType = Enum.RaycastFilterType.Include
+				params.FilterDescendantsInstances = filter
+				live = workspace:Raycast(ray.Origin, direction * RAY_LENGTH, params)
+			end
 		end
 
 		local snapped = if #snapshotList > 0 then SurfaceRay.cast(ray.Origin, direction, RAY_LENGTH, snapshotList) else nil
@@ -290,8 +374,9 @@ return function (plugin: Plugin): () -> ()
 	end
 
 	-- What the brush would move at `hit`, by the same rules as Paint.apply and the same tiles as
-	-- applyBrush: tiles near the cursor (found with a spatial query, so hovering opens only those,
-	-- never the whole place), without back faces.
+	-- applyBrush: tiles near the cursor (found via Session.nearRadius, so hovering opens only
+	-- those, never the whole place), without back faces. Uses limit = 1 when dots are hidden so
+	-- empty-ring dimming stays cheap, and caches across stationary frames.
 	local function previewAt(models: { Model }, hit: Hit, mode: Paint.Effect, settings: Settings.State): Paint.Preview?
 		local opened = hit.opened
 
@@ -299,38 +384,60 @@ return function (plugin: Plugin): () -> ()
 			return nil
 		end
 
-		local hitFace = opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(opened.disp))
-		local reach = math.max(settings.radius, Paint.gridSpacing(opened)) * 2
-		local filter: { Instance } = table.create(#models)
+		local gen = Session.generation()
+		local cached = previewCache
 
-		for i, model in models do
-			filter[i] = model
+		if
+			cached
+			and cached.opened == opened
+			and cached.disp == opened.disp
+			and cached.radius == settings.radius
+			and cached.mode == mode
+			and cached.falloff == settings.falloff
+			and cached.showDots == settings.showBrushDots
+			and cached.selectedOnly == settings.paintSelectedOnly
+			and cached.selectionVersion == selectionVersion
+			and cached.gen == gen
+			and cached.strokeVersion == strokeVersion
+			and (cached.position - hit.position).Magnitude < 0.05
+		then
+			return cached.result
 		end
 
-		local params = OverlapParams.new()
-		params.FilterType = Enum.RaycastFilterType.Include
-		params.FilterDescendantsInstances = filter
-
+		local hitFace = opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		local reach = math.max(settings.radius, Paint.gridSpacing(opened)) * 2
+		local allowed = if settings.paintSelectedOnly then models else nil
 		local targets = { opened }
-		local seen: { [Model]: true } = { [opened.model] = true }
+		local seen: { [Opened]: true } = { [opened] = true }
 
-		for _, part in workspace:GetPartBoundsInRadius(hit.position, reach, params) do
-			local model = Query.displacementOf(part)
-
-			if not model or seen[model] then
+		for _, other in Session.nearRadius(hit.position, reach, allowed) do
+			if seen[other] then
 				continue
 			end
 
-			seen[model] = true
-
-			local other = Session.get(model)
-
-			if other and other.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(other.disp)):Dot(hitFace) >= BACK_FACE_DOT then
+			if other.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(other.disp)):Dot(hitFace) >= BACK_FACE_DOT then
+				seen[other] = true
 				table.insert(targets, other)
 			end
 		end
 
-		return Paint.preview(targets, hit.position, brushFor(mode, settings), MAX_DOTS, opened)
+		local limit = if settings.showBrushDots then MAX_DOTS else 1
+		local result = Paint.preview(targets, hit.position, brushFor(mode, settings), limit, opened)
+		previewCache = {
+			opened = opened,
+			disp = opened.disp,
+			position = hit.position,
+			radius = settings.radius,
+			mode = mode,
+			falloff = settings.falloff,
+			showDots = settings.showBrushDots,
+			selectedOnly = settings.paintSelectedOnly,
+			selectionVersion = selectionVersion,
+			gen = gen,
+			strokeVersion = strokeVersion,
+			result = result,
+		}
+		return result
 	end
 
 	local function dotAt(i: number): SphereHandleAdornment
@@ -405,15 +512,27 @@ return function (plugin: Plugin): () -> ()
 		-- small ring, including across a seam.
 		local grid = if hitOpened then Paint.gridSpacing(hitOpened) else 0
 		local reach = math.max(settings.radius, grid) * 2.5 + (if lastCenter then (center - lastCenter).Magnitude else 0)
+		local allowed = if settings.paintSelectedOnly then models else nil
 		local targets: { Opened } = {}
+		local seenTargets: { [Opened]: true } = {}
 
-		for _, opened in Session.getAll(models) do
+		if hitOpened then
+			seenTargets[hitOpened] = true
+			table.insert(targets, hitOpened)
+		end
+
+		for _, opened in Session.nearRadius(center, reach, allowed) do
+			if seenTargets[opened] then
+				continue
+			end
+
 			local pivot = opened.model:GetPivot()
 			local faceNormal = pivot:VectorToWorldSpace(Displacement.faceNormal(opened.disp))
 			local nearest = pivot:PointToObjectSpace(center)
 			local gap = (nearest - nearest:Max(opened.boundsMin):Min(opened.boundsMax)).Magnitude
 
-			if opened == hitOpened or (faceNormal:Dot(hitFace) >= BACK_FACE_DOT and gap <= reach) then
+			if faceNormal:Dot(hitFace) >= BACK_FACE_DOT and gap <= reach then
+				seenTargets[opened] = true
 				table.insert(targets, opened)
 			end
 		end
@@ -474,8 +593,38 @@ return function (plugin: Plugin): () -> ()
 		end
 
 		if next(changed) == nil then
+			framePinned = false
 			return
 		end
+
+		-- Detect when every vertex Paint moved is locked to a part edge so the cursor can show
+		-- "Pinned" immediately instead of waiting until mouse-up.
+		local allPinned = settings.stitchParts and next(propagated) ~= nil
+
+		if allPinned then
+			for opened, vertices in changed do
+				local pinsOf = propagated[opened]
+
+				if not pinsOf then
+					allPinned = false
+					break
+				end
+
+				for v in vertices do
+					if not pinsOf[v] then
+						allPinned = false
+						break
+					end
+				end
+
+				if not allPinned then
+					break
+				end
+			end
+		end
+
+		framePinned = allPinned
+		strokeVersion += 1
 
 		local moved: Changes = {}
 
@@ -650,6 +799,7 @@ return function (plugin: Plugin): () -> ()
 
 	function endStroke()
 		resize = nil
+		framePinned = false
 
 		local current = recording
 
@@ -785,6 +935,12 @@ return function (plugin: Plugin): () -> ()
 	table.insert(connections, mouse.Button1Up:Connect(endStroke))
 	table.insert(
 		connections,
+		Selection.SelectionChanged:Connect(function ()
+			selectionVersion += 1
+		end)
+	)
+	table.insert(
+		connections,
 		mouse.Button2Down:Connect(function ()
 			if Settings.get().painting and not recording and Input.alt() then
 				pickAxis()
@@ -797,6 +953,45 @@ return function (plugin: Plugin): () -> ()
 		return Settings.get().painting
 	end, Settings.stepRadius) do
 		table.insert(connections, connection)
+	end
+
+	-- Shows a 3D movement direction arrow for explicit world axes (X, Z, Picked) in Raise and
+	-- Lower so custom axes are visible in the viewport instead of only as numbers in the panel.
+	local function placeAxisArrow(position: Vector3, settings: Settings.State, mode: Paint.Effect)
+		if (mode ~= "Raise" and mode ~= "Lower") or (settings.axis ~= "X" and settings.axis ~= "Z" and settings.axis ~= "Picked") then
+			hideAxisArrow()
+			return
+		end
+
+		local dir = Paint.worldAxisOf(brushFor(mode, settings))
+
+		if not dir then
+			hideAxisArrow()
+			return
+		end
+
+		if mode == "Lower" then
+			dir = -dir
+		end
+
+		local up = if math.abs(dir.Y) > 0.99 then Vector3.xAxis else Vector3.yAxis
+		local length = math.clamp(settings.radius * 0.4, 1.2, 4.5)
+		local thickness = math.clamp(length * 0.055, 0.08, 0.22)
+		local shaftLen = length * 0.72
+		local headLen = length * 0.28
+		local color = MODE_COLORS[mode]
+
+		axisShaft.Height = shaftLen
+		axisShaft.Radius = thickness * 0.55
+		axisShaft.CFrame = CFrame.lookAt(position + dir * (shaftLen * 0.5), position + dir * length, up)
+		axisShaft.Color3 = color
+		axisShaft.Visible = true
+
+		axisHead.Height = headLen
+		axisHead.Radius = thickness * 1.6
+		axisHead.CFrame = CFrame.lookAt(position + dir * shaftLen, position + dir * length, up)
+		axisHead.Color3 = color
+		axisHead.Visible = true
 	end
 
 	-- The ring is always the real radius. It dims while it holds no point, since a stroke there
@@ -819,6 +1014,7 @@ return function (plugin: Plugin): () -> ()
 
 		-- Dim slightly while dragging so terrain stays clear.
 		ring.Transparency = if empty then 0.6 elseif recording then 0.45 else 0.2
+		placeAxisArrow(position, settings, mode)
 	end
 
 	local function isEmpty(preview: Paint.Preview?): boolean
@@ -890,8 +1086,6 @@ return function (plugin: Plugin): () -> ()
 				return
 			end
 
-			RadiusPreview.label(nil)
-
 			local hit = findHit(models)
 
 			if not hit then
@@ -934,8 +1128,19 @@ return function (plugin: Plugin): () -> ()
 
 			-- After this frame's paint, so the dots sit on the points where they are now.
 			local preview = previewAt(models, hit, mode, settings)
-			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, isEmpty(preview))
+			local pinnedNow = recording ~= nil and framePinned
+			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, isEmpty(preview) or pinnedNow)
 			showPreview(preview, mode, settings.showBrushDots)
+
+			-- Show an inline non-color cue near the cursor when pinned mid-stroke or when Ctrl/Shift
+			-- temporarily overrides the active sculpt mode (helps red-green colorblindness too).
+			if pinnedNow then
+				RadiusPreview.label(hit.position, "Pinned")
+			elseif mode ~= settings.mode then
+				RadiusPreview.label(hit.position, Settings.modeLabel(mode))
+			else
+				RadiusPreview.label(nil)
+			end
 		end)
 	)
 
@@ -951,6 +1156,8 @@ return function (plugin: Plugin): () -> ()
 
 		ring:Destroy()
 		ghost:Destroy()
+		axisShaft:Destroy()
+		axisHead:Destroy()
 
 		for _, dot in dots do
 			dot:Destroy()

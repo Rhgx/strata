@@ -32,7 +32,7 @@ local function bakeModels(models: { Model }): Session.BakeResult
 	end
 
 	Recording.run("Strata bake", function ()
-		result = Session.bake(Session.getAll(models), Settings.get().smoothingAngle)
+		result = Session.bake(Session.getAll(models), Settings.get().smoothingAngle, false, true)
 	end)
 
 	return result
@@ -47,8 +47,8 @@ function Bake.bakeAll(): Session.BakeResult
 end
 
 -- Rebakes every tile in the place as one undo step so updated Settings > Baking options apply
--- to previously baked tiles. Tiles transition directly from their old union to the new one,
--- building wedges only when needed; any tile that fails remains as wedges.
+-- to previously baked tiles. Tiles transition one by one from their old union to the new one so
+-- cancelling midway leaves untouched tiles intact; any tile that fails remains as wedges.
 function Bake.rebakeAll(): Session.BakeResult
 	if Session.isBaking() then
 		error("Already baking; wait for it to finish", 0)
@@ -57,15 +57,7 @@ function Bake.rebakeAll(): Session.BakeResult
 	local result = Session.emptyResult()
 
 	Recording.run("Strata rebake", function ()
-		local targets = Session.getAll(Session.models())
-
-		for _, opened in targets do
-			-- Preserve appearance edits made with Studio tools before removing the old union.
-			TerrainInstance.adoptAppearance(opened)
-			TerrainInstance.removeSurfaces(opened.model)
-		end
-
-		result = Session.bake(targets, Settings.get().smoothingAngle)
+		result = Session.bake(Session.getAll(Session.models()), Settings.get().smoothingAngle, true, true)
 	end)
 
 	return result
@@ -129,6 +121,15 @@ end
 function Bake.report(ok: boolean, result: Session.BakeResult | string, verb: string, nothing: string?)
 	if not ok or typeof(result) == "string" then
 		Status.post("error", `{if verb == "Rebaked" then "Rebake" else "Bake"} failed: {result}`)
+	elseif result.cancelled then
+		if result.failed > 0 then
+			Status.post("error", `{verb} {result.baked}, {result.failed} failed before cancel: {result.firstError}`)
+		elseif result.baked > 0 then
+			local action = if verb == "Rebaked" then "rebaking" else "baking"
+			Status.post("warning", `Cancelled after {action} {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
+		else
+			Status.post("warning", `{if verb == "Rebaked" then "Rebake" else "Bake"} cancelled.`)
+		end
 	elseif result.failed > 0 then
 		Status.post("error", `{verb} {result.baked}, {result.failed} failed: {result.firstError}`)
 	elseif result.baked > 0 then
@@ -161,8 +162,8 @@ function Bake.bakeEdited()
 	)
 
 	if not changed then
-		-- Cancelling undoes any instances created while opening tiles (such as a missing Tris
-		-- folder), so cached handles may reference removed instances.
+		-- Cancelling reverts any attributes written inside the recording (such as adoptAppearance),
+		-- so clear cached handles to keep them in sync.
 		Session.clear()
 	end
 

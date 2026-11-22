@@ -18,6 +18,8 @@ local Core = Plugin.Core
 local Displacement = require(Core.Displacement)
 local TerrainInstance = require(Core.TerrainInstance)
 
+local Settings = require(Plugin.State.Settings)
+
 local Session = require(Plugin.Scene.Session)
 
 local TileHit = require(Viewport.TileHit)
@@ -109,20 +111,26 @@ end
 -- Returns opened tiles in `models` within reach of `hit` and facing the same general direction.
 function TriangleBrush.tilesInReach(models: { Model }, hit: TileHit.Hit, radius: number, travel: number): { Opened }
 	local hitFace = hit.opened.model:GetPivot():VectorToWorldSpace(Displacement.faceNormal(hit.opened.disp))
-	local result = {}
+	local allowed = if Settings.get().paintSelectedOnly then models else nil
+	local reach = radius + travel
+	local result = { hit.opened }
+	local seen: { [Opened]: true } = { [hit.opened] = true }
 
-	for _, opened in Session.getAll(models) do
-		if opened ~= hit.opened then
-			local pivot = opened.model:GetPivot()
-			local faceNormal = pivot:VectorToWorldSpace(Displacement.faceNormal(opened.disp))
-			local nearest = pivot:PointToObjectSpace(hit.position)
-			local gap = (nearest - nearest:Max(opened.boundsMin):Min(opened.boundsMax)).Magnitude
-
-			if faceNormal:Dot(hitFace) < BACK_FACE_DOT or gap > radius + travel then
-				continue
-			end
+	for _, opened in Session.nearRadius(hit.position, reach, allowed) do
+		if seen[opened] then
+			continue
 		end
 
+		local pivot = opened.model:GetPivot()
+		local faceNormal = pivot:VectorToWorldSpace(Displacement.faceNormal(opened.disp))
+		local nearest = pivot:PointToObjectSpace(hit.position)
+		local gap = (nearest - nearest:Max(opened.boundsMin):Min(opened.boundsMax)).Magnitude
+
+		if faceNormal:Dot(hitFace) < BACK_FACE_DOT or gap > reach then
+			continue
+		end
+
+		seen[opened] = true
 		table.insert(result, opened)
 	end
 

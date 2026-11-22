@@ -19,6 +19,7 @@
 	inserted, and reopened for editing in any Studio session.
 ]]
 
+local HttpService = game:GetService("HttpService")
 local GeometryService = game:GetService("GeometryService")
 local CollectionService = game:GetService("CollectionService")
 
@@ -31,6 +32,16 @@ local WedgeBuilder = require(Core.WedgeBuilder)
 local DATA_NAME = "DispData"
 local TRIS_NAME = "Tris"
 local SURFACE_NAME = "Surface"
+-- Unique per-save revision stamped on DispData so Session can detect which tiles actually
+-- changed across undo/redo instead of dropping the whole cache. Prefixed with a per-session
+-- GUID so a reloaded session or Team Create editor never collides with an already-saved Rev.
+local REV_ATTR = "Rev"
+local SESSION_ID = HttpService:GenerateGUID(false)
+local nextRev = 0
+-- Tracks DispData Configurations currently inside a synchronous Strata write (for Immediate
+-- SignalBehavior). Deferred SignalBehavior is handled by comparing live attributes against
+-- `opened.attrs` rather than relying on deferred callback ordering.
+local internalWriting: { [Configuration]: true } = {}
 
 -- Size and clearance depth of the temporary anchor cube used to align union texture axes
 -- (sits well below the wedges, which extend WedgeBuilder.THICKNESS below the surface).
@@ -49,6 +60,11 @@ export type Opened = {
 	-- Local-space AABB of the current surface for fast spatial culling.
 	boundsMin: Vector3,
 	boundsMax: Vector3,
+	-- Last Rev attribute read from or written to `config` (nil on tiles never saved with Rev).
+	rev: string?,
+	-- Snapshot of `config:GetAttributes()` from the last open/save so Session can tell Strata's
+	-- own writes apart from direct Studio Properties edits or undo/redo under any SignalBehavior.
+	attrs: { [string]: unknown },
 }
 
 export type BakeOptions = {
@@ -80,6 +96,27 @@ local function computeBounds(disp: Displacement.Displacement, known: { Vector3 }
 	end
 
 	return min, max
+end
+
+local function readRev(config: Configuration): string?
+	local value = config:GetAttribute(REV_ATTR)
+
+	return if typeof(value) == "string" then value else nil
+end
+
+-- Returns the displacement Model that is or contains `inst`, if any.
+function TerrainInstance.of(inst: Instance): Model?
+	local node: Instance? = inst
+
+	while node do
+		if node:IsA("Model") and CollectionService:HasTag(node, TerrainInstance.TAG) then
+			return node
+		end
+
+		node = node.Parent
+	end
+
+	return nil
 end
 
 -- Creates a displacement Model. Pass `skipWedges = true` when baking immediately (ensureWedges
@@ -122,11 +159,13 @@ function TerrainInstance.create(
 		wedges = wedges,
 		boundsMin = boundsMin,
 		boundsMax = boundsMax,
+		rev = readRev(config),
+		attrs = config:GetAttributes(),
 	}
 end
 
--- Opens an existing displacement Model. Does not mutate instances except recreating a missing
--- Tris folder; call `ensureWedges` before editing.
+-- Opens an existing displacement Model without mutating the place (if Tris is missing, an
+-- unparented Folder is held until ensureTris/ensureWedges runs inside a recording).
 function TerrainInstance.open(model: Model): Opened
 	local config = model:FindFirstChild(DATA_NAME)
 
@@ -143,7 +182,6 @@ function TerrainInstance.open(model: Model): Opened
 	else
 		folder = Instance.new("Folder")
 		folder.Name = TRIS_NAME
-		folder.Parent = model
 	end
 
 	local boundsMin, boundsMax = computeBounds(disp)
@@ -155,7 +193,70 @@ function TerrainInstance.open(model: Model): Opened
 		wedges = WedgeBuilder.attach(folder),
 		boundsMin = boundsMin,
 		boundsMax = boundsMax,
+		rev = readRev(config),
+		attrs = config:GetAttributes(),
 	}
+end
+
+-- Runs `writer` against `config` while marking it as an internal Strata write, then stamps a
+-- session-unique Rev and snapshots `opened.attrs` synchronously. Works under both Immediate
+-- and Deferred SignalBehavior without relying on deferred callback ordering.
+function TerrainInstance.writeConfig(config: Configuration, opened: Opened?, writer: () -> ())
+	internalWriting[config] = true
+
+	local ok, err = pcall(function ()
+		writer()
+		nextRev += 1
+
+		local rev = `{SESSION_ID}:{nextRev}`
+		config:SetAttribute(REV_ATTR, rev)
+
+		if opened then
+			opened.rev = rev
+			opened.attrs = config:GetAttributes()
+		end
+	end)
+
+	internalWriting[config] = nil
+
+	if not ok then
+		error(err, 0)
+	end
+end
+
+function TerrainInstance.isInternalWrite(config: Configuration): boolean
+	return internalWriting[config] == true
+end
+
+function TerrainInstance.currentRev(config: Configuration): string?
+	return readRev(config)
+end
+
+-- Ensures `opened.wedges.folder` is parented under `opened.model` before writing wedges.
+function TerrainInstance.ensureTris(opened: Opened)
+	local existing = opened.model:FindFirstChild(TRIS_NAME)
+
+	if existing and existing:IsA("Folder") then
+		if opened.wedges.folder ~= existing then
+			opened.wedges = WedgeBuilder.attach(existing)
+		end
+
+		return
+	end
+
+	opened.wedges.folder.Parent = opened.model
+end
+
+-- Re-indexes existing wedges after undo/redo when a tile's DispData did not change (for example,
+-- undoing a Bake brings WedgeParts back into Tris without touching DispData).
+function TerrainInstance.reattachWedges(opened: Opened)
+	local existing = opened.model:FindFirstChild(TRIS_NAME)
+
+	if existing and existing:IsA("Folder") then
+		opened.wedges = WedgeBuilder.attach(existing)
+	else
+		table.clear(opened.wedges.parts)
+	end
 end
 
 -- Baked surfaces are UnionOperations, or plain Parts when flatPart is enabled.
@@ -270,7 +371,9 @@ function TerrainInstance.adoptAppearance(opened: Opened): boolean
 	end
 
 	if changed then
-		Displacement.save(disp, opened.config)
+		TerrainInstance.writeConfig(opened.config, opened, function ()
+			Displacement.save(disp, opened.config)
+		end)
 	end
 
 	return changed
@@ -282,6 +385,7 @@ end
 function TerrainInstance.ensureWedges(opened: Opened): boolean
 	TerrainInstance.adoptAppearance(opened)
 	TerrainInstance.removeSurfaces(opened.model)
+	TerrainInstance.ensureTris(opened)
 
 	if not WedgeBuilder.isComplete(opened.disp, opened.wedges) then
 		WedgeBuilder.rebuild(opened.disp, opened.wedges, opened.model:GetPivot())
@@ -694,7 +798,9 @@ function TerrainInstance.refreshBounds(opened: Opened, positions: { Vector3 }?)
 end
 
 function TerrainInstance.save(opened: Opened)
-	Displacement.save(opened.disp, opened.config)
+	TerrainInstance.writeConfig(opened.config, opened, function ()
+		Displacement.save(opened.disp, opened.config)
+	end)
 end
 
 return TerrainInstance
