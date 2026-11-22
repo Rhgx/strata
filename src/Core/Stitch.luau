@@ -998,6 +998,65 @@ function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
 		return result
 	end
 
+	-- Consecutive flat edge points of each tile, built on first use.
+	local segmentsOf: { [Opened]: { { Vector3 } } } = {}
+	local tiles: { Opened } = table.clone(neighbors)
+
+	for opened in moves do
+		if not table.find(tiles, opened) then
+			table.insert(tiles, opened)
+		end
+	end
+
+	local function segmentsFor(opened: Opened): { { Vector3 } }
+		local cached = segmentsOf[opened]
+
+		if cached then
+			return cached
+		end
+
+		local tile = buildTile(opened)
+		local segments: { { Vector3 } } = {}
+
+		for _, edge in Displacement.edges(opened.disp) do
+			for k = 1, #edge.indices - 1 do
+				table.insert(segments, { flatOf(tile, edge.indices[k]), flatOf(tile, edge.indices[k + 1]) })
+			end
+		end
+
+		segmentsOf[opened] = segments
+		return segments
+	end
+
+	-- Whether `flat` lies inside (not at an end of) a segment of another tile's edge: the mark of
+	-- a denser tile's 2:1 intermediate point. A twinless point on a tile's open border lies on no
+	-- other edge, and must keep its own position rather than be pulled onto a line between moves.
+	local function insideOtherEdge(flat: Vector3, owner: Opened): boolean
+		for _, other in tiles do
+			if other == owner then
+				continue
+			end
+
+			for _, segment in segmentsFor(other) do
+				local a, b = segment[1], segment[2]
+				local ab = b - a
+				local length2 = ab:Dot(ab)
+
+				if length2 < 1e-9 then
+					continue
+				end
+
+				local t = (flat - a):Dot(ab) / length2
+
+				if math.sqrt(length2) * math.min(t, 1 - t) > TOLERANCE and (flat - (a + ab * t)).Magnitude <= TOLERANCE then
+					return true
+				end
+			end
+		end
+
+		return false
+	end
+
 	local pad = Vector3.one * TOLERANCE
 	min -= pad
 	max += pad
@@ -1058,8 +1117,9 @@ function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
 
 						for k = from + 1, step - 1 do
 							local v = indices[k]
+							local flat = flatOf(tile, v)
 
-							if not (own and own[v]) and not added[v] and not twinOf(flatOf(tile, v), opened) then
+							if not (own and own[v]) and not added[v] and not twinOf(flat, opened) and insideOtherEdge(flat, opened) then
 								added[v] = a:Lerp(b, (k - from) / (step - from))
 								any = true
 							end
