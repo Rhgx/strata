@@ -11,6 +11,7 @@ Technical reference for the Strata Roblox Studio plugin.
 | [Baking](baking.md) | Why tiles bake, CSG pipeline, flat slab fast path, anchor cube alignment, bake optimizations, and smoothing angle. |
 | [Hammer mapping](hammer.md) | Unit scale, coordinate conversion, Hammer feature mapping, Strata additions, and deliberate deviations. |
 | [Panel UI](ui.md) | Dock widget layout, viewport shortcuts, accent colors, `Rows` helpers, tooltip markup, `Dropdown`, and `ColorPicker`. |
+| [Testing](testing.md) | Jest-Lua unit test suite, building and running `tests.rbxm` in Studio, writing specs, and test boundaries. |
 
 ## Logo and icon assets
 

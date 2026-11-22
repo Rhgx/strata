@@ -37,6 +37,8 @@ Build straight into your local Studio Plugins folder (Studio loads new plugin fi
 rojo build --plugin Strata.rbxm
 ```
 
+To build and run the dev-only unit test suite in Studio, see [Testing](docs/testing.md).
+
 ## Documentation
 
 Technical documentation lives in [`docs/`](docs/README.md):
@@ -49,3 +51,4 @@ Technical documentation lives in [`docs/`](docs/README.md):
 | [Baking](docs/baking.md) | Texture projection, flat slab fast path, anchor cube alignment, two-step CSG, and bake optimizations |
 | [Hammer mapping](docs/hammer.md) | Unit scale, Valve Hammer equivalents, Strata additions, and intentional deviations |
 | [Panel UI](docs/ui.md) | Panel layout, viewport shortcuts, color system, `Rows` helpers, `Dropdown`, and `ColorPicker` |
+| [Testing](docs/testing.md) | Jest-Lua unit test suite, running `tests.rbxm` in Studio, and adding specs |
