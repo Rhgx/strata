@@ -81,8 +81,11 @@ return function (plugin: Plugin): () -> ()
 	-- Stroke state.
 	local recording: string? = nil
 	local touched: { [Opened]: true } = {}
-	-- Cached world-space triangle centers per tile (valid while tile pivot does not change).
-	local centers: { [Opened]: { pivot: CFrame, list: { Vector3 } } } = {}
+	-- Cached world-space shown triangle centers per tile, valid while the tile keeps its pivot,
+	-- its data (Detail replaces it) and its triangles (Restore points or the Mesh tool rebuild
+	-- them while this tool stays on, and stale centers would point the brush at wrong triangles).
+	type CenterCache = { pivot: CFrame, disp: Displacement.Displacement, mesh: unknown?, list: { Vector3 } }
+	local centers: { [Opened]: CenterCache } = {}
 	local warned: { [Opened]: true } = {}
 	local lastCenter: Vector3? = nil
 	local wasColoring = false
@@ -106,14 +109,16 @@ return function (plugin: Plugin): () -> ()
 
 	local function centersOf(opened: Opened): { Vector3 }
 		local pivot = opened.model:GetPivot()
+		local mesh = Displacement.mesh(opened.disp)
 		local cached = centers[opened]
 
-		if cached and cached.pivot == pivot then
+		if cached and cached.pivot == pivot and cached.disp == opened.disp and cached.mesh == mesh then
 			return cached.list
 		end
 
 		local computed = TileHit.centers(opened)
-		centers[opened] = { pivot = pivot, list = computed }
+		centers[opened] = { pivot = pivot, disp = opened.disp, mesh = mesh, list = computed }
+
 		return computed
 	end
 
