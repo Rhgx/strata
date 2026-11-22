@@ -283,6 +283,41 @@ function MeshActions.applyMarks(): (number, number)
 	return tiles, points
 end
 
+-- Removes `points` right away as one undo step (deleting handles in Edit points), mirrored across
+-- seams like Apply. Corners always stay and are skipped. Returns how many points were removed on
+-- the given tiles.
+function MeshActions.removePoints(points: { [Opened]: { number } }): number
+	local marked: { [Opened]: { [number]: MeshStage.Mark } } = {}
+
+	for opened, list in points do
+		local marks: { [number]: MeshStage.Mark } = {}
+
+		for _, v in list do
+			if not Displacement.isCorner(opened.disp, v) and not opened.disp.removed[v] then
+				marks[v] = "remove"
+			end
+		end
+
+		if next(marks) ~= nil then
+			marked[opened] = marks
+		end
+	end
+
+	if next(marked) == nil then
+		return 0
+	end
+
+	local removed = 0
+
+	Recording.run("Strata remove points", function ()
+		local _, count = applyPointMarks(marked)
+		removed = count
+		Recording.autoBake()
+	end)
+
+	return removed
+end
+
 -- Restores every removed point on selected tiles immediately as one undo step, mirrored across
 -- seams like Apply, so a restored edge never meets a neighbor's straight simplified edge.
 -- Returns the number of modified tiles.

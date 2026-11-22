@@ -44,8 +44,8 @@ local function PointsPage()
 
 		Usage = Rows.paragraph(
 			4,
-			"Select points in 3D (click, Ctrl + click, or drag a box), then move them with Studio's Move, Rotate, or Scale tools. "
-				.. "For exact coordinates, edit Pivot > Origin in Properties."
+			"Select points in 3D (click, Ctrl + click, or drag a box), then move them with Studio's Move, Rotate, or Scale tools, "
+				.. "or press Delete to remove them. For exact coordinates, edit Pivot > Origin in Properties."
 		),
 
 		Simplified = if info.simplified > 0

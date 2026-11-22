@@ -55,6 +55,7 @@ All eight tools and Edit points register bindable `PluginAction`s under `File > 
 | `Pick faces` | `Enter` | Create tiles from picked faces |
 | `Stitch` | `Click` | Stitch nearby tile edges onto the clicked part (and joined sheet) |
 | Edit points | Studio's `Select`, `Move`, `Rotate`, `Scale` | Pick point handles (click, `Ctrl + Click`, drag a box) and move them; each drag or Properties edit is one undo step |
+| Edit points | `Delete` | Remove the selected points (tile corners always stay) |
 
 ### Sculpt movement axes
 

@@ -22,6 +22,10 @@
 	Points with nothing to move get no handle: points removed by Simplify (they follow the
 	surface), points whose every triangle is a hole, and the middle points of a denser tile along
 	a coarser neighbor's 2:1 edge (they must stay on that straight edge).
+
+	Deleting handles (Delete, Cut) removes their points like the Mesh tool's Simplify, as one undo
+	step; the surface fills in with larger triangles. Tile corners always stay, so their handles
+	come back.
 ]]
 
 local Selection = game:GetService("Selection")
@@ -49,6 +53,7 @@ local Session = require(Scene.Session)
 
 local Bake = require(Actions.Bake)
 local Edges = require(Actions.Edges)
+local MeshActions = require(Actions.Mesh)
 
 type Opened = TerrainInstance.Opened
 
@@ -282,16 +287,91 @@ local function markDirty(handle: Handle)
 	dirty[handle] = true
 end
 
--- Handles deleted, grouped, or moved out (Delete, Ctrl+G) would strand points; put them back.
--- Plugin signals arrive deferred, after our own cleanup has finished, so a removal counts only
--- when it is a current handle or the current handle folder: everything we remove ourselves is
--- forgotten before it goes.
-local function onRemoved(child: Instance)
-	local current = child == container or (child:IsA("BasePart") and byPart[child] ~= nil and child.Parent ~= container)
+-- Handles deleted since the last removal pass, removed together as one undo step.
+local deleted: { Handle } = {}
+local deleteScheduled = false
 
-	if current then
-		Status.post("warning", "Points cannot be deleted or grouped here. Use the Mesh tool to remove points.")
-		-- A cleared layout forces a full rebuild.
+-- Removes the points of deleted handles, then rebuilds (bringing back any corner handle).
+local function removeDeleted()
+	deleteScheduled = false
+
+	local list = deleted
+	deleted = {}
+
+	local points: { [Opened]: { number } } = {}
+	local removable, corners = 0, 0
+
+	for _, handle in list do
+		local found: { { tile: Opened, index: number } } = {}
+		local corner = false
+
+		for _, member in handle.members do
+			local tile = Session.get(member.model)
+
+			if tile then
+				table.insert(found, { tile = tile, index = member.index })
+				corner = corner or Displacement.isCorner(tile.disp, member.index)
+			end
+		end
+
+		-- A point that is a corner of any tile stays on all of them, so seams keep matching.
+		if corner then
+			corners += 1
+			continue
+		end
+
+		for _, entry in found do
+			local own = points[entry.tile] or {}
+			table.insert(own, entry.index)
+			points[entry.tile] = own
+		end
+
+		removable += 1
+	end
+
+	local note = if corners > 0 then ` Tile corners always stay ({corners} kept).` else ""
+	local ok, err = pcall(MeshActions.removePoints, points)
+
+	if not ok then
+		Status.post("error", `Could not remove points: {err}`)
+	elseif removable > 0 then
+		Status.post("success", `Removed {Format.plural(removable, "point")}.{note}`)
+	elseif corners > 0 then
+		Status.post("warning", "Tile corners always stay, so they cannot be removed.")
+	end
+
+	-- A cleared layout forces a full rebuild, so every point that still exists gets its handle back.
+	table.clear(layouts)
+	scheduleResync()
+end
+
+-- Deleting handles (Delete, Cut) removes their points; grouping them or moving them out
+-- (Ctrl+G, dragging in the Explorer) would strand points, so they are put back. Plugin signals
+-- arrive deferred, after our own cleanup has finished, so a removal counts only when it is a
+-- current handle or the current handle folder: everything we remove ourselves is forgotten first.
+local function onRemoved(child: Instance)
+	if child == container then
+		Status.post("warning", "The point handles' folder cannot be deleted or moved. Select points to remove them.")
+		table.clear(layouts)
+		scheduleResync()
+		return
+	end
+
+	local handle = if child:IsA("BasePart") then byPart[child] else nil
+
+	if not handle or child.Parent == container then
+		return
+	end
+
+	if child.Parent == nil then
+		table.insert(deleted, handle)
+
+		if not deleteScheduled then
+			deleteScheduled = true
+			task.defer(removeDeleted)
+		end
+	else
+		Status.post("warning", "Points cannot be grouped or moved out. Delete points to remove them.")
 		table.clear(layouts)
 		scheduleResync()
 	end

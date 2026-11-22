@@ -10,7 +10,7 @@ Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement te
 - **Stitch and sew**: snap tile edges onto nearby block or wedge parts (including wedge floors) and keep them pinned across edits, or weld seams between neighboring tiles automatically or on demand ([Hammer mapping](docs/hammer.md)).
 - **Shape tiles**: change tile detail (`Low 5x5`, `Medium 9x9`, `High 17x17`), smooth folded seams with `Round`, apply deterministic `Noise`, or `Split 2x2` losslessly into smaller tiles.
 - **Mesh density and holes**: simplify flat areas into fewer, larger triangles (manually or with `Auto-simplify`) and cut holes for paths or openings, with lossless restore ([Data format](docs/data-format.md)).
-- **Edit points**: put a handle on every point of the selected tiles and move single points with Studio's own Move, Rotate, and Scale tools, with seams kept closed ([Architecture](docs/architecture.md#edit-points)).
+- **Edit points**: put a handle on every point of the selected tiles and move single points with Studio's own Move, Rotate, and Scale tools (or delete them), with seams kept closed ([Architecture](docs/architecture.md#edit-points)).
 - **Appearance**: change a tile's base `Material`, `Color`, or `MaterialVariant` without unbaking, or copy a look from any part or tile with the pipette ([Panel UI](docs/ui.md)).
 - **Bake and reopen**: merge wedges into unions automatically or on demand with configurable smoothing and bake optimizations, and restore wedges automatically on the next edit ([Baking](docs/baking.md)).
 
