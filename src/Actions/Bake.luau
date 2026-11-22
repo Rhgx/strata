@@ -11,6 +11,7 @@ local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.State.Status)
+local Format = require(script.Parent.Parent.State.Format)
 local Recording = require(script.Parent.Recording)
 
 local Bake = {}
@@ -101,6 +102,23 @@ end
 
 -- Bakes everything edited since the last bake as its own undo step, and posts the result. Run
 -- when painting or the Stitch tool stops. Never raises: a busy Studio only posts a warning.
+--[[
+	Posts a bake's result to the status bar: `ok` and `result` as pcall returns them, `verb`
+	"Baked" or "Rebaked", and `nothing` posted as a warning when no tile needed baking (nil posts
+	nothing then, for automatic bakes).
+]]
+function Bake.report(ok: boolean, result: Session.BakeResult | string, verb: string, nothing: string?)
+	if not ok or typeof(result) == "string" then
+		Status.post("error", `{if verb == "Rebaked" then "Rebake" else "Bake"} failed: {result}`)
+	elseif result.failed > 0 then
+		Status.post("error", `{verb} {result.baked}, {result.failed} failed: {result.firstError}`)
+	elseif result.baked > 0 then
+		Status.post("success", `{verb} {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
+	elseif nothing then
+		Status.post("warning", nothing)
+	end
+end
+
 function Bake.bakeEdited()
 	local recording = ChangeHistoryService:TryBeginRecording("Strata bake")
 	if not recording then
@@ -122,16 +140,7 @@ function Bake.bakeEdited()
 		-- opened copies may point at removed instances.
 		Session.clear()
 	end
-	if not ok then
-		Status.post("error", `Bake failed: {result}`)
-		return
-	end
-	if result.failed > 0 then
-		Status.post("error", `Baked {result.baked}, {result.failed} failed: {result.firstError}`)
-	elseif result.baked > 0 then
-		local tiles = if result.baked == 1 then "1 tile" else `{result.baked} tiles`
-		Status.post("success", `Baked {tiles}{Session.savings(result)}.`)
-	end
+	Bake.report(ok, result, "Baked")
 end
 
 return Bake

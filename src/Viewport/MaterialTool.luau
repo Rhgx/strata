@@ -17,18 +17,19 @@
 ]]
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
-local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local Displacement = require(script.Parent.Parent.Core.Displacement)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
+local Format = require(script.Parent.Parent.State.Format)
 local Status = require(script.Parent.Parent.State.Status)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Bake = require(script.Parent.Parent.Actions.Bake)
+local VisibleHit = require(script.Parent.VisibleHit)
 local Input = require(script.Parent.Input)
+local Cursor = require(script.Parent.Cursor)
 local KeyStrip = require(script.Parent.KeyStrip)
 local Lines = require(script.Parent.Lines)
 local RadiusPreview = require(script.Parent.RadiusPreview)
@@ -38,9 +39,6 @@ local TriangleOutline = require(script.Parent.TriangleOutline)
 
 type Opened = TerrainInstance.Opened
 
-local RAY_LENGTH = 10000
--- Invisible parts are looked through when picking a look, up to this many.
-local MAX_SKIPS = 8
 -- Each look bakes into its own union, so past this many looks on one tile the user is told.
 local LOOK_WARNING = 4
 local ERASE_COLOR = Color3.fromRGB(230, 96, 80)
@@ -51,10 +49,6 @@ local MAX_OUTLINE_LINES = 300
 -- The outline is rebuilt when the cursor moves at least this far (or anything else changes).
 local OUTLINE_MOVE = 0.25
 local SEPARATOR = KeyStrip.SEPARATOR
-
-local function formatStuds(value: number): string
-	return if value == math.floor(value) then tostring(value) else string.format("%.1f", value)
-end
 
 local function describe(look: Displacement.Look): string
 	local name = (look.material.Name:gsub("(%l)(%u)", "%1 %2"))
@@ -67,18 +61,6 @@ end
 -- Whether a stroke now erases: Erase mode, or Paint mode with Ctrl held (Ctrl swaps them).
 local function erasing(settings: Settings.State): boolean
 	return settings.paintErase ~= Input.ctrl()
-end
-
-local function newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
-	local ring = Instance.new("CylinderHandleAdornment")
-	ring.Name = name
-	ring.Adornee = workspace.Terrain
-	ring.Height = 0.06
-	ring.AlwaysOnTop = alwaysOnTop
-	ring.Transparency = transparency
-	ring.Visible = false
-	ring.Parent = CoreGui
-	return ring
 end
 
 -- Starts the tool and returns a function that stops it.
@@ -100,7 +82,7 @@ return function(plugin: Plugin): () -> ()
 
 	-- The cursor is the outline of the triangles a click would paint. The ring only shows the
 	-- size during a radius preview with no terrain in the middle of the view.
-	local ring = newRing("StrataMaterialPreview", true, 0.5)
+	local ring = RadiusPreview.newRing("StrataMaterialPreview", true, 0.5)
 	local keyStrip = KeyStrip.new("StrataMaterialHints")
 	local outline = Lines.new("StrataMaterialOutline", MAX_OUTLINE_LINES)
 	local outlined: { opened: Opened, triangle: number?, position: Vector3, radius: number, fine: boolean, erase: boolean }? = nil
@@ -110,13 +92,6 @@ return function(plugin: Plugin): () -> ()
 		outline.clear()
 		outlined = nil
 		RadiusPreview.label(nil)
-	end
-
-	local function workingModels(): { Model }
-		if Settings.get().paintSelectedOnly then
-			return Query.selectedModels()
-		end
-		return Session.models()
 	end
 
 	local function centersOf(opened: Opened): { Vector3 }
@@ -195,23 +170,9 @@ return function(plugin: Plugin): () -> ()
 
 	-- The visible part under the mouse (tiles included), looking through invisible ones.
 	local function partUnderMouse(): BasePart?
-		local exclude: { Instance } = { workspace.Terrain }
-		local ray = mouse.UnitRay
-		for _ = 1, MAX_SKIPS do
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = exclude
-			local hit = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
-			if not hit then
-				return nil
-			end
-			if hit.Instance.Transparency >= 0.99 then
-				table.insert(exclude, hit.Instance)
-				continue
-			end
-			return hit.Instance
-		end
-		return nil
+		local hit = VisibleHit.cast(mouse.UnitRay, { workspace.Terrain })
+		return if hit then hit.Instance else nil
+
 	end
 
 	-- Takes the paint look from the part or tile under the cursor (a tile's wedges and unions
@@ -274,7 +235,7 @@ return function(plugin: Plugin): () -> ()
 			return
 		end
 		lastCenter = nil
-		local models = workingModels()
+		local models = Query.workingModels()
 		local hit = TileHit.find(mouse, models)
 		if hit then
 			paintAt(models, hit)
@@ -342,20 +303,6 @@ return function(plugin: Plugin): () -> ()
 	end
 	table.insert(
 		connections,
-		Input.onKey(function(input: Input.Key)
-			if not Settings.get().coloring or UserInputService:GetFocusedTextBox() then
-				return
-			end
-			if input.KeyCode == Enum.KeyCode.LeftBracket then
-				Settings.stepRadius(-1)
-			elseif input.KeyCode == Enum.KeyCode.RightBracket then
-				Settings.stepRadius(1)
-			end
-		end)
-	)
-
-	table.insert(
-		connections,
 		RunService.Heartbeat:Connect(function()
 			local settings = Settings.get()
 			if not settings.coloring then
@@ -371,7 +318,7 @@ return function(plugin: Plugin): () -> ()
 					if erase then "Left Drag: Erase" else "Left Drag: Paint",
 					if settings.paintErase then "Ctrl: Paint" else "Ctrl: Erase",
 					"Alt + Right Click: Pick look",
-					`Ctrl + Scroll: Size ({formatStuds(settings.radius)})`,
+					`Ctrl + Scroll: Size ({Format.studs(settings.radius)})`,
 					"Esc: Stop",
 				}
 			end
@@ -379,6 +326,7 @@ return function(plugin: Plugin): () -> ()
 
 			if settings.pickingLook then
 				hideCursor()
+				Cursor.set(if partUnderMouse() then "valid" else "invalid")
 				return
 			end
 			local resizing = resize
@@ -390,7 +338,8 @@ return function(plugin: Plugin): () -> ()
 					end)
 				end
 			end
-			local models = workingModels()
+			local models = Query.workingModels()
+			Cursor.set(if resizing then "resize" elseif #models == 0 then "empty" else nil)
 			local previewing = RadiusPreview.active()
 			local ray = if resizing then resizing.ray elseif previewing then RadiusPreview.ray() else mouse.UnitRay
 			local hit = if ray then TileHit.findAlong(ray, models) else nil
@@ -407,13 +356,13 @@ return function(plugin: Plugin): () -> ()
 					ring.InnerRadius = settings.radius - math.max(0.15, settings.radius * 0.04)
 					ring.Color3 = PAINT_COLOR
 					ring.Visible = true
-					RadiusPreview.label(position, `Radius {formatStuds(settings.radius)} st`)
+					RadiusPreview.label(position, `Radius {Format.studs(settings.radius)} st`)
 				end
 				return
 			end
 			ring.Visible = false
 			drawOutline(models, hit, settings, erase)
-			RadiusPreview.label(if previewing or resizing then hit.position else nil, `Radius {formatStuds(settings.radius)} st`)
+			RadiusPreview.label(if previewing or resizing then hit.position else nil, `Radius {Format.studs(settings.radius)} st`)
 
 			if recording then
 				paintAt(models, hit)

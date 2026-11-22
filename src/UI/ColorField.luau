@@ -14,7 +14,7 @@ local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
 
 local ColorPicker = require(script.Parent.ColorPicker)
-local Format = require(script.Parent.Format)
+local Format = require(script.Parent.Parent.State.Format)
 local Icons = require(script.Parent.Icons)
 local Tooltip = require(script.Parent.Tooltip)
 

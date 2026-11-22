@@ -20,7 +20,7 @@ The panel is divided into three vertical regions:
 - `src/UI/useSettings.luau`: subscribes a component to `State/Settings`.
 - `src/UI/useRefresh.luau`: triggers a re-render on `Selection.SelectionChanged`, `ChangeHistoryService.OnUndo`/`OnRedo`, and `State/Status` updates so selection info and tile counts stay current.
 - `src/UI/Icons.luau`: wraps `Lucide.GetAsset(name, 48)` with theme tinting (`16x16` for the tool strip and status bar; `14x14` for page buttons and dropdown items).
-- `src/UI/Format.luau`: comma-grouped counts (`12,345`), natural plurals (`1 tile` / `3 tiles`), and color hex / `"R, G, B"` parsing and formatting.
+- `src/State/Format.luau`: comma-grouped counts (`12,345`), natural plurals (`1 tile` / `3 tiles`), stud lengths (`Format.studs`), and color hex / `"R, G, B"` parsing and formatting. It lives in `State` so the tools and actions use it too, for status messages and 3D labels.
 
 ## Color (`src/UI/Accent.luau`)
 
@@ -41,7 +41,7 @@ Pages are composed from layout helpers in `src/UI/Rows.luau` (`LABEL_WIDTH = 66`
 - `Rows.property`, `Rows.value`: two-column label/control rows (66 px label column, control fills the remainder) wrapped in a whole-row hover tooltip when a tooltip is provided.
 - `Rows.grid`: equal-width `UIGridLayout` rows (kept to at most 2 columns for icon buttons at minimum panel width).
 - `Rows.button`, `Rows.checkbox`, `Rows.withTooltip`: full-width controls with hover tooltips. `Rows.button`'s `primary` flag uses `StudioComponents.MainButton` (Studio's blue) for the one action a page leads to: `Create`, `Apply` (Mesh), `Bake` (Tiles) and `Bake all` (Overview), at most one per page.
-- `Rows.paragraph`, `Rows.heading`: wrapping themed `TextLabel`s using `AutomaticSize.Y` (since `StudioComponents.Label` does not auto-size).
+- `Rows.paragraph`: wrapping themed `TextLabel`s using `AutomaticSize.Y` (since `StudioComponents.Label` does not auto-size).
 - `Rows.collapsible`: chevron-headed collapsible section whose open/closed state persists per section ID for the duration of the Studio session.
 
 ## Tooltips and markup (`src/UI/Tooltip.luau`, `src/UI/Markup.luau`)

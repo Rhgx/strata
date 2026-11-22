@@ -14,11 +14,10 @@ local Status = require(script.Parent.Parent.State.Status)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Appearance = require(script.Parent.Parent.Actions.Appearance)
+local VisibleHit = require(script.Parent.VisibleHit)
+local Cursor = require(script.Parent.Cursor)
 local KeyStrip = require(script.Parent.KeyStrip)
 
-local RAY_LENGTH = 10000
--- Invisible parts (triggers, hitboxes) are looked through, up to this many.
-local MAX_SKIPS = 8
 local HOVER_COLOR = Color3.fromRGB(80, 160, 255)
 local SEPARATOR = KeyStrip.SEPARATOR
 
@@ -45,23 +44,9 @@ return function(plugin: Plugin): () -> ()
 
 	-- The visible part under the mouse (terrain tiles included), looking through invisible ones.
 	local function partUnderMouse(): BasePart?
-		local exclude: { Instance } = { workspace.Terrain }
-		local ray = mouse.UnitRay
-		for _ = 1, MAX_SKIPS do
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = exclude
-			local hit = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
-			if not hit then
-				return nil
-			end
-			if hit.Instance.Transparency >= 0.99 then
-				table.insert(exclude, hit.Instance)
-				continue
-			end
-			return hit.Instance
-		end
-		return nil
+		local hit = VisibleHit.cast(mouse.UnitRay, { workspace.Terrain })
+		return if hit then hit.Instance else nil
+
 	end
 
 	local function describe(part: BasePart): string
@@ -83,6 +68,7 @@ return function(plugin: Plugin): () -> ()
 			end
 			local part = partUnderMouse()
 			hovered = part
+			Cursor.set(if part then "valid" else "invalid")
 			-- Highlight the whole tile when hovering terrain, otherwise the part.
 			local tile = if part then Query.displacementOf(part) else nil
 			box.Adornee = tile or part

@@ -14,6 +14,7 @@ local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local WedgeBuilder = require(script.Parent.Parent.Core.WedgeBuilder)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.State.Status)
+local Format = require(script.Parent.Parent.State.Format)
 
 type Opened = TerrainInstance.Opened
 
@@ -46,7 +47,7 @@ function Session.savings(result: BakeResult): string
 	if result.bakedTriangles >= result.triangles then
 		return ""
 	end
-	return ` ({result.triangles} to {result.bakedTriangles} triangles)`
+	return ` ({Format.count(result.triangles)} to {Format.count(result.bakedTriangles)} triangles)`
 end
 
 -- Every displacement model in the workspace.

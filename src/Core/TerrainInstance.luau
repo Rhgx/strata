@@ -234,29 +234,6 @@ function TerrainInstance.adoptAppearance(opened: Opened): boolean
 	return changed
 end
 
--- Gives the tile's own look new values: saves them and applies them to the wedges and the baked
--- union in that look. Painted triangles keep their looks.
-function TerrainInstance.setAppearance(opened: Opened, material: Enum.Material, color: Color3, variant: string)
-	local disp = opened.disp
-	disp.material, disp.color, disp.materialVariant = material, color, variant
-	Displacement.save(disp, opened.config)
-	local parts: { BasePart } = {}
-	for n, wedge in opened.wedges.parts do
-		-- Hidden hole wedges too, so a restored triangle shows the tile's look.
-		if Displacement.shownLookIndex(disp, (n + 1) // 2) <= 0 then
-			table.insert(parts, wedge)
-		end
-	end
-	local surface = TerrainInstance.surface(opened.model)
-	if surface then
-		table.insert(parts, surface)
-	end
-	for _, part in parts do
-		part.Material = material
-		part.Color = color
-		part.MaterialVariant = variant
-	end
-end
 
 -- Prepares a displacement for editing: removes the baked unions if there are any and
 -- regenerates any missing or extra wedges (for example after a power change, or if parts were

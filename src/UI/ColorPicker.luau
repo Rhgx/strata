@@ -20,7 +20,7 @@ local ReactRoblox = require(Packages.ReactRoblox)
 local StudioComponents = require(Packages.StudioComponents)
 
 local Dropdown = require(script.Parent.Dropdown)
-local Format = require(script.Parent.Format)
+local Format = require(script.Parent.Parent.State.Format)
 
 local e = React.createElement
 

@@ -32,6 +32,7 @@ local UserInputService = game:GetService("UserInputService")
 local Displacement = require(script.Parent.Parent.Core.Displacement)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
+local Format = require(script.Parent.Parent.State.Format)
 local Status = require(script.Parent.Parent.State.Status)
 local MeshStage = require(script.Parent.Parent.Scene.MeshStage)
 local Session = require(script.Parent.Parent.Scene.Session)
@@ -39,6 +40,7 @@ local Query = require(script.Parent.Parent.Scene.Query)
 local Bake = require(script.Parent.Parent.Actions.Bake)
 local MeshActions = require(script.Parent.Parent.Actions.Mesh)
 local Input = require(script.Parent.Input)
+local Cursor = require(script.Parent.Cursor)
 local KeyStrip = require(script.Parent.KeyStrip)
 local Lines = require(script.Parent.Lines)
 local RadiusPreview = require(script.Parent.RadiusPreview)
@@ -67,22 +69,6 @@ local KEPT_COLOR = Color3.fromRGB(235, 235, 235)
 local DRAG_PIXELS = 4
 local SEPARATOR = KeyStrip.SEPARATOR
 
-local function formatStuds(value: number): string
-	return if value == math.floor(value) then tostring(value) else string.format("%.1f", value)
-end
-
-local function newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
-	local ring = Instance.new("CylinderHandleAdornment")
-	ring.Name = name
-	ring.Adornee = workspace.Terrain
-	ring.Height = 0.06
-	ring.AlwaysOnTop = alwaysOnTop
-	ring.Transparency = transparency
-	ring.Visible = false
-	ring.Parent = CoreGui
-	return ring
-end
-
 local function edgeKey(a: number, b: number, count: number): number
 	return math.min(a, b) * (count + 1) + math.max(a, b)
 end
@@ -105,7 +91,7 @@ return function(plugin: Plugin): () -> ()
 
 	-- No ring: Simplify's cursor is the highlighted points, Cut holes' is the outline of the
 	-- triangles a click would delete. The faint ring only shows the size during a radius preview.
-	local ring = newRing("StrataMeshPreview", true, 0.65)
+	local ring = RadiusPreview.newRing("StrataMeshPreview", true, 0.65)
 	local keyStrip = KeyStrip.new("StrataMeshHints")
 	local lines = Lines.new("StrataMeshLine", MAX_LINES)
 	local outline = Lines.new("StrataMeshOutline", MAX_OUTLINE_LINES)
@@ -160,13 +146,6 @@ return function(plugin: Plugin): () -> ()
 		hideCursor()
 		previewLines.clear()
 		previewDrawn = -1
-	end
-
-	local function workingModels(): { Model }
-		if Settings.get().paintSelectedOnly then
-			return Query.selectedModels()
-		end
-		return Session.models()
 	end
 
 	-- Shown triangle centers, kept across frames until the tile moves or its triangles change.
@@ -468,7 +447,7 @@ return function(plugin: Plugin): () -> ()
 			Status.post("warning", "Studio is busy recording another change. Stroke skipped.")
 			return
 		end
-		local models = workingModels()
+		local models = Query.workingModels()
 		local hit = findHit(models)
 		if hit then
 			cutAt(models, hit)
@@ -480,7 +459,7 @@ return function(plugin: Plugin): () -> ()
 		local current = press
 		press = nil
 		if current and not current.dragging and Settings.get().meshing then
-			local hit = findHit(workingModels())
+			local hit = findHit(Query.workingModels())
 			if hit then
 				toggleNearest(hit)
 			end
@@ -544,11 +523,7 @@ return function(plugin: Plugin): () -> ()
 			if not settings.meshing or UserInputService:GetFocusedTextBox() then
 				return
 			end
-			if input.KeyCode == Enum.KeyCode.LeftBracket then
-				Settings.stepRadius(-1)
-			elseif input.KeyCode == Enum.KeyCode.RightBracket then
-				Settings.stepRadius(1)
-			elseif
+			if
 				settings.meshMode == "Simplify"
 				and (input.KeyCode == Enum.KeyCode.Return or input.KeyCode == Enum.KeyCode.KeypadEnter or input.KeyCode == Enum.KeyCode.X)
 				and not Input.ctrl()
@@ -587,7 +562,7 @@ return function(plugin: Plugin): () -> ()
 					"<b>Cut holes</b>",
 					if restoring then "Left Drag: Restore triangles" else "Left Drag: Delete triangles",
 					"Ctrl: Restore",
-					`Ctrl + Scroll: Size ({formatStuds(settings.radius)})`,
+					`Ctrl + Scroll: Size ({Format.studs(settings.radius)})`,
 					"Esc: Stop",
 				}
 				else {
@@ -595,7 +570,7 @@ return function(plugin: Plugin): () -> ()
 					if restoring then "Drag: Mark to restore" else "Drag: Mark to remove",
 					"Click: Toggle point",
 					"Ctrl: Restore",
-					if marked then "Enter: Apply" else `Ctrl + Scroll: Size ({formatStuds(settings.radius)})`,
+					if marked then "Enter: Apply" else `Ctrl + Scroll: Size ({Format.studs(settings.radius)})`,
 					if marked then "Esc: Clear marks" else "Esc: Stop",
 				}
 			keyStrip.show(if settings.showKeyHints then table.concat(hints, SEPARATOR) else nil)
@@ -613,11 +588,12 @@ return function(plugin: Plugin): () -> ()
 					end)
 				end
 			end
-			local models = workingModels()
+			local models = Query.workingModels()
+			Cursor.set(if resizing then "resize" elseif #models == 0 then "empty" else nil)
 			local previewing = RadiusPreview.active() or resizing ~= nil
 			local ray = if resizing then resizing.ray elseif RadiusPreview.active() then RadiusPreview.ray() else mouse.UnitRay
 			local hit = if ray then TileHit.findAlong(ray, models, holes) else nil
-			local sizeText = `Radius {formatStuds(settings.radius)} st`
+			local sizeText = `Radius {Format.studs(settings.radius)} st`
 			if not hit then
 				hideCursor()
 				local position, facing = nil, nil

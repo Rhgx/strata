@@ -19,8 +19,10 @@ local PartFaces = require(script.Parent.Parent.Core.PartFaces)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Create = require(script.Parent.Parent.Actions.Create)
+local VisibleHit = require(script.Parent.VisibleHit)
 local KeyStrip = require(script.Parent.KeyStrip)
 local Input = require(script.Parent.Input)
+local Cursor = require(script.Parent.Cursor)
 
 export type Pick = {
 	part: BasePart,
@@ -29,9 +31,6 @@ export type Pick = {
 
 type Listener = () -> ()
 
-local RAY_LENGTH = 10000
--- Invisible parts (triggers, hitboxes) are looked through, up to this many.
-local MAX_SKIPS = 8
 local HIGHLIGHT_THICKNESS = 0.06
 local HOVER_COLOR = Color3.fromRGB(80, 160, 255)
 local PICKED_COLOR = Color3.fromRGB(255, 196, 64)
@@ -139,27 +138,13 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 		for _, model in CollectionService:GetTagged(TerrainInstance.TAG) do
 			table.insert(exclude, model)
 		end
-		local ray = mouse.UnitRay
-		for _ = 1, MAX_SKIPS do
-			local params = RaycastParams.new()
-			params.FilterType = Enum.RaycastFilterType.Exclude
-			params.FilterDescendantsInstances = exclude
-			local hit = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
-			if not hit then
-				return nil, nil
-			end
-			local part = hit.Instance
-			if part.Transparency >= 0.99 then
-				table.insert(exclude, part)
-				continue
-			end
-			if not PartFaces.isEligible(part) then
-				return nil, nil
-			end
-			-- A wedge's triangular sides match no quad face and are rejected here.
-			return part, PartFaces.faceAt(part, hit.Normal)
+		local hit = VisibleHit.cast(mouse.UnitRay, exclude)
+		if not hit or not PartFaces.isEligible(hit.Instance) then
+			return nil, nil
 		end
-		return nil, nil
+		-- A wedge's triangular sides match no quad face and are rejected here.
+		return hit.Instance, PartFaces.faceAt(hit.Instance, hit.Normal)
+
 	end
 
 	table.insert(
@@ -188,9 +173,11 @@ function PickFaceTool.start(plugin: Plugin): () -> ()
 			if part and face then
 				place(hover, face)
 				hovered = { part = part, face = face.id }
+				Cursor.set("valid")
 			else
 				hover.Visible = false
 				hovered = nil
+				Cursor.set("invalid")
 			end
 		end)
 	)

@@ -13,6 +13,7 @@ local Selection = game:GetService("Selection")
 local PartFaces = require(script.Parent.Parent.Core.PartFaces)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Session = require(script.Parent.Session)
+local Settings = require(script.Parent.Parent.State.Settings)
 
 type Opened = TerrainInstance.Opened
 
@@ -293,6 +294,15 @@ function Query.selectionInfo(): SelectionInfo
 		holes = holes,
 		simplified = simplified,
 	}
+end
+
+-- The displacements a viewport tool works on: the selected ones with Selected only on (Hammer's
+-- behavior), or every one.
+function Query.workingModels(): { Model }
+	if Settings.get().paintSelectedOnly then
+		return Query.selectedModels()
+	end
+	return Session.models()
 end
 
 -- Every displacement in the place and how many are baked (a tile whose every triangle is

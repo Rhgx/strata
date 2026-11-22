@@ -21,6 +21,20 @@ local label: TextLabel? = nil
 local studio = settings().Studio
 
 -- Starts the preview after the Radius changed in the panel.
+-- A flat ring that shows a brush's radius in the 3D view (the tools' cursors and size previews).
+-- Hidden until placed; the caller sets CFrame, Radius, InnerRadius and Color3, and destroys it.
+function RadiusPreview.newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
+	local ring = Instance.new("CylinderHandleAdornment")
+	ring.Name = name
+	ring.Adornee = workspace.Terrain
+	ring.Height = 0.06
+	ring.AlwaysOnTop = alwaysOnTop
+	ring.Transparency = transparency
+	ring.Visible = false
+	ring.Parent = CoreGui
+	return ring
+end
+
 function RadiusPreview.pulse()
 	showUntil = os.clock() + SHOW_SECONDS
 end

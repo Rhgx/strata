@@ -279,13 +279,6 @@ function Displacement.isRemoved(disp: Displacement, index: number): boolean
 	return disp.removed[index] == true
 end
 
-function Displacement.removedCount(disp: Displacement): number
-	local count = 0
-	for _ in disp.removed do
-		count += 1
-	end
-	return count
-end
 
 -- Removes or restores a point. Corners cannot be removed. Returns whether anything changed.
 function Displacement.setRemoved(disp: Displacement, index: number, removed: boolean): boolean

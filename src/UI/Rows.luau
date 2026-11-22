@@ -269,14 +269,14 @@ function Rows.checkbox(
 end
 
 -- StudioComponents.Label has no AutomaticSize, so wrapping text uses a themed TextLabel.
-local function Paragraph(props: { LayoutOrder: number, Text: string, Tone: Tone?, Bold: boolean? })
+local function Paragraph(props: { LayoutOrder: number, Text: string, Tone: Tone? })
 	local theme = StudioComponents.useTheme()
 	return e("TextLabel", {
 		LayoutOrder = props.LayoutOrder,
 		Size = UDim2.fromScale(1, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundTransparency = 1,
-		Text = if props.Bold then `<b>{props.Text}</b>` else props.Text,
+		Text = props.Text,
 		RichText = true,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -291,9 +291,6 @@ function Rows.paragraph(layoutOrder: number, text: string, tone: Tone?)
 	return e(Paragraph, { LayoutOrder = layoutOrder, Text = text, Tone = tone })
 end
 
-function Rows.heading(layoutOrder: number, text: string)
-	return e(Paragraph, { LayoutOrder = layoutOrder, Text = text, Bold = true })
-end
 
 -- Open or closed per section id for this Studio session, so switching tabs does not snap a
 -- section shut; every new session starts with the default.

@@ -8,19 +8,52 @@
 
 	Also the one Esc handler, so a single press does one thing: close Settings or Help if open,
 	otherwise clear the Mesh tool's marked points if there are any, otherwise stop the running tool.
+
+	And the one writer of the mouse cursor, chosen every frame in this order: Wait while a bake
+	runs (clicks are refused then), SizeEW during an Alt + Drag resize, Forbidden when the tool has
+	nothing to act on, then the tool's own: Cross for the brushes, Material and Mesh, and for the
+	click tools (Pick faces, Stitch, Sample, the Material pipette) PointingHand over something
+	they can use, otherwise Arrow. Tools report what they know through Viewport/Cursor.
 ]]
 
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 
 local Settings = require(script.Parent.Parent.State.Settings)
 local MeshStage = require(script.Parent.Parent.Scene.MeshStage)
+local Session = require(script.Parent.Parent.Scene.Session)
 local PickFaceTool = require(script.Parent.PickFaceTool)
+local Cursor = require(script.Parent.Cursor)
 local Input = require(script.Parent.Input)
 
 local ICONS = {
 	paint = "rbxasset://SystemCursors/Cross",
-	pick = "rbxasset://SystemCursors/PointingHand",
+	point = "rbxasset://SystemCursors/PointingHand",
+	arrow = "rbxasset://SystemCursors/Arrow",
+	resize = "rbxasset://SystemCursors/SizeEW",
+	forbidden = "rbxasset://SystemCursors/Forbidden",
+	wait = "rbxasset://SystemCursors/Wait",
 }
+
+-- The cursor for the running tool (see the top), or "" with none.
+local function iconFor(state: Settings.State): string
+	local clicking = state.picking or state.stitching or state.sampling or (state.coloring and state.pickingLook)
+	local brushing = state.painting or state.coloring or state.meshing
+	if not (clicking or brushing) then
+		return ""
+	end
+	local hint = Cursor.get()
+	if Session.isBaking() then
+		return ICONS.wait
+	elseif hint == "resize" then
+		return ICONS.resize
+	elseif hint == "empty" then
+		return ICONS.forbidden
+	elseif clicking then
+		return if hint == "valid" then ICONS.point else ICONS.arrow
+	end
+	return ICONS.paint
+end
 -- Seconds a Deactivation waits to see whether it came with a tool switch.
 local SWITCH_GRACE = 0.1
 
@@ -49,6 +82,10 @@ return function(plugin: Plugin): () -> ()
 		if tool and tool ~= current then
 			switchedAt = os.clock()
 		end
+		if tool ~= current then
+			-- The hint belonged to the tool that was running.
+			Cursor.set(nil)
+		end
 		current = tool
 		if wants and not active then
 			active = true
@@ -59,15 +96,21 @@ return function(plugin: Plugin): () -> ()
 			plugin:Deactivate()
 			releasing = false
 		end
-		mouse.Icon = if state.coloring and state.pickingLook
-			then ICONS.pick
-			elseif state.painting or state.coloring or state.meshing then ICONS.paint
-			elseif state.picking or state.stitching or state.sampling then ICONS.pick
-			else ""
+		mouse.Icon = iconFor(state)
 	end
 
 	local unsubscribe = Settings.subscribe(sync)
 	local connections = {
+		-- Hover, resizing and baking change between Settings updates; written only on a change.
+		RunService.Heartbeat:Connect(function()
+			if not active then
+				return
+			end
+			local icon = iconFor(Settings.get())
+			if mouse.Icon ~= icon then
+				mouse.Icon = icon
+			end
+		end),
 		plugin.Deactivation:Connect(function()
 			if releasing then
 				return

@@ -30,9 +30,7 @@
 ]]
 
 local ChangeHistoryService = game:GetService("ChangeHistoryService")
-local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 
 local Displacement = require(script.Parent.Parent.Core.Displacement)
 local Paint = require(script.Parent.Parent.Core.Paint)
@@ -41,13 +39,16 @@ local Stitch = require(script.Parent.Parent.Core.Stitch)
 local SurfaceRay = require(script.Parent.Parent.Core.SurfaceRay)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local Settings = require(script.Parent.Parent.State.Settings)
+local Format = require(script.Parent.Parent.State.Format)
 local Status = require(script.Parent.Parent.State.Status)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Edges = require(script.Parent.Parent.Actions.Edges)
 local Bake = require(script.Parent.Parent.Actions.Bake)
 local Input = require(script.Parent.Input)
+local Cursor = require(script.Parent.Cursor)
 local RadiusPreview = require(script.Parent.RadiusPreview)
+local VisibleHit = require(script.Parent.VisibleHit)
 local KeyStrip = require(script.Parent.KeyStrip)
 
 type Opened = TerrainInstance.Opened
@@ -86,10 +87,6 @@ local MODE_COLORS: { [Paint.Effect]: Color3 } = {
 	RaiseTo = Color3.fromRGB(230, 190, 70),
 }
 
-local function formatStuds(value: number): string
-	return if value == math.floor(value) then tostring(value) else string.format("%.1f", value)
-end
-
 -- The viewport key strip for the active brush: only keys that do something with it.
 local function keyHints(mode: Paint.Effect, settings: Settings.State, effective: number): string
 	local parts: { string }
@@ -104,15 +101,15 @@ local function keyHints(mode: Paint.Effect, settings: Settings.State, effective:
 		parts = { "<b>Smooth</b>", "Left Drag: Smooth" }
 	else
 		parts = {
-			`<b>Raise To ({formatStuds(settings.height)})</b>`,
+			`<b>Raise To ({Format.studs(settings.height)})</b>`,
 			"Left Drag: Set height",
 			"Ctrl + Click: Pick height",
 			"Shift: Smooth",
 		}
 	end
 	local size = if effective > settings.radius + 1e-3
-		then `{formatStuds(settings.radius)}, grid min {formatStuds(math.round(effective * 10) / 10)}`
-		else formatStuds(settings.radius)
+		then `{Format.studs(settings.radius)}, grid min {Format.studs(math.round(effective * 10) / 10)}`
+		else Format.studs(settings.radius)
 	table.insert(parts, `Ctrl + Scroll: Size ({size})`)
 	table.insert(parts, "Alt + Right Click: Axis")
 	table.insert(parts, "Esc: Stop")
@@ -139,18 +136,6 @@ local function isEdgeVertex(disp: Displacement.Displacement, v: number): boolean
 	local size = disp.size
 	local row, col = k // size, k % size
 	return row == 0 or col == 0 or row == size - 1 or col == size - 1
-end
-
-local function newRing(name: string, alwaysOnTop: boolean, transparency: number): CylinderHandleAdornment
-	local ring = Instance.new("CylinderHandleAdornment")
-	ring.Name = name
-	ring.Adornee = workspace.Terrain
-	ring.Height = 0.06
-	ring.AlwaysOnTop = alwaysOnTop
-	ring.Transparency = transparency
-	ring.Visible = false
-	ring.Parent = CoreGui
-	return ring
 end
 
 -- Starts the brush tool and returns a function that stops it.
@@ -184,22 +169,14 @@ return function(plugin: Plugin): () -> ()
 
 	-- The ring is depth tested (true 3D occlusion); the faint ghost copy draws on top so the
 	-- brush stays readable inside valleys. Both sit on the same circle, so they read as one.
-	local ring = newRing("StrataBrushCursor", false, 0.2)
-	local ghost = newRing("StrataBrushGhost", true, 0.78)
+	local ring = RadiusPreview.newRing("StrataBrushCursor", false, 0.2)
+	local ghost = RadiusPreview.newRing("StrataBrushGhost", true, 0.78)
 	local keyStrip = KeyStrip.new("StrataKeyHints")
 
 	local function hideCursor()
 		ring.Visible = false
 		ghost.Visible = false
 		RadiusPreview.label(nil)
-	end
-
-	-- The displacements the brush works on: the selected ones (Hammer's behavior) or all.
-	local function workingModels(): { Model }
-		if Settings.get().paintSelectedOnly then
-			return Query.selectedModels()
-		end
-		return Session.models()
 	end
 
 	-- The surface under the mouse: snapshots for tiles this stroke already reached, live wedges
@@ -405,31 +382,16 @@ return function(plugin: Plugin): () -> ()
 		-- From World with a world axis: any visible part counts (a road or pad to match), not
 		-- just terrain.
 		local axis = if settings.raiseToWorld then Paint.worldAxisOf(brushFor("RaiseTo", settings)) else nil
-		if axis then
-			local ray = mouse.UnitRay
-			local exclude: { Instance } = {}
-			for _ = 1, 8 do
-				local params = RaycastParams.new()
-				params.FilterType = Enum.RaycastFilterType.Exclude
-				params.FilterDescendantsInstances = exclude
-				local result = workspace:Raycast(ray.Origin, ray.Direction * RAY_LENGTH, params)
-				if not result then
-					break
-				end
-				local part = result.Instance
-				if part:IsA("BasePart") and part.Transparency >= 0.99 then
-					table.insert(exclude, part)
-					continue
-				end
-				local height = math.round(result.Position:Dot(axis) * 10) / 10
-				Settings.update(function(s)
-					s.height = height
-				end)
-				Status.post("success", `Raise To height set to {formatStuds(height)} studs from {part.Name}.`)
-				return
-			end
+		local partHit = if axis then VisibleHit.cast(mouse.UnitRay) else nil
+		if axis and partHit then
+			local height = math.round(partHit.Position:Dot(axis) * 10) / 10
+			Settings.update(function(s)
+				s.height = height
+			end)
+			Status.post("success", `Raise To height set to {Format.studs(height)} studs from {partHit.Instance.Name}.`)
+			return
 		end
-		local hit = findHit(workingModels())
+		local hit = findHit(Query.workingModels())
 		local opened = if hit then hit.opened else nil
 		if not hit or not opened then
 			Status.post("warning", "No terrain under the cursor to pick a height from.")
@@ -439,7 +401,7 @@ return function(plugin: Plugin): () -> ()
 		Settings.update(function(s)
 			s.height = height
 		end)
-		Status.post("success", `Raise To height set to {formatStuds(height)} studs.`)
+		Status.post("success", `Raise To height set to {Format.studs(height)} studs.`)
 	end
 
 	-- Declared ahead: beginStroke ends a stroke whose button release was missed.
@@ -484,7 +446,7 @@ return function(plugin: Plugin): () -> ()
 		lastCenter = nil
 		-- Dab right away, so a quick click always does something (waiting for the next frame
 		-- could miss a click released before it).
-		local models = workingModels()
+		local models = Query.workingModels()
 		local hit = findHit(models)
 		if hit then
 			lastHit = hit
@@ -568,20 +530,6 @@ return function(plugin: Plugin): () -> ()
 		table.insert(connections, connection)
 	end
 
-	table.insert(
-		connections,
-		Input.onKey(function(input: Input.Key)
-			if not Settings.get().painting or UserInputService:GetFocusedTextBox() then
-				return
-			end
-			if input.KeyCode == Enum.KeyCode.LeftBracket then
-				Settings.stepRadius(-1)
-			elseif input.KeyCode == Enum.KeyCode.RightBracket then
-				Settings.stepRadius(1)
-			end
-		end)
-	)
-
 	-- The radius the brush really affects at `hit` (the grid may widen a small brush).
 	local function effectiveAt(hit: Hit?, mode: Paint.Effect, settings: Settings.State): number
 		local opened = if hit then hit.opened else nil
@@ -619,6 +567,7 @@ return function(plugin: Plugin): () -> ()
 
 			local resizing = resize
 			if resizing then
+				Cursor.set("resize")
 				local radius = Input.dragRadius(mouse, resizing)
 				if radius ~= settings.radius then
 					Settings.update(function(s)
@@ -627,21 +576,22 @@ return function(plugin: Plugin): () -> ()
 				end
 				-- The ring stays where the drag started (or the surface along the drag's first ray),
 				-- with the size next to it.
-				local held = lastHit or findHit(workingModels(), resizing.ray)
+				local held = lastHit or findHit(Query.workingModels(), resizing.ray)
 				if held then
 					local current = Settings.get()
 					placeCursor(held.position, displayNormal or held.normal, current, mode, effectiveAt(held, mode, current))
-					RadiusPreview.label(held.position, `Radius {formatStuds(current.radius)} st`)
+					RadiusPreview.label(held.position, `Radius {Format.studs(current.radius)} st`)
 				end
 				return
 			end
 
-			local models = workingModels()
+			local models = Query.workingModels()
+			Cursor.set(if #models == 0 then "empty" else nil)
 			-- After a Radius change in the panel, show the brush in the middle of the view.
 			if RadiusPreview.active() and not recording then
 				local ray = RadiusPreview.ray()
 				local previewHit = if ray then findHit(models, ray) else nil
-				local text = `Radius {formatStuds(settings.radius)} st`
+				local text = `Radius {Format.studs(settings.radius)} st`
 				if previewHit then
 					placeCursor(previewHit.position, previewHit.normal, settings, mode, effectiveAt(previewHit, mode, settings))
 					RadiusPreview.label(previewHit.position, text)

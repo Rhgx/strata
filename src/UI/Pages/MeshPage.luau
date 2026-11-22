@@ -12,7 +12,7 @@ local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local MeshStage = require(script.Parent.Parent.Parent.Scene.MeshStage)
 local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
-local Format = require(script.Parent.Parent.Format)
+local Format = require(script.Parent.Parent.Parent.State.Format)
 
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)

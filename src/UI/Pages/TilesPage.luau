@@ -6,7 +6,6 @@ local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.Parent.State.Status)
-local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Edges = require(script.Parent.Parent.Parent.Actions.Edges)
 local Shape = require(script.Parent.Parent.Parent.Actions.Shape)
@@ -14,7 +13,7 @@ local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
 local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
 local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
 local ColorField = require(script.Parent.Parent.ColorField)
-local Format = require(script.Parent.Parent.Format)
+local Format = require(script.Parent.Parent.Parent.State.Format)
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 local Dropdown = require(script.Parent.Parent.Dropdown)
@@ -133,15 +132,6 @@ local function noiseInput(value: number, onChanged: (number) -> ())
 	})
 end
 
-local function reportBake(result: Session.BakeResult)
-	if result.failed > 0 then
-		Status.post("error", `Baked {result.baked}, {result.failed} failed: {result.firstError}`)
-	elseif result.baked == 0 then
-		Status.post("warning", "Those tiles are already baked.")
-	else
-		Status.post("success", `Baked {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
-	end
-end
 
 local function reportStitch(report: Edges.StitchReport, reach: number)
 	if report.edges > 0 then
@@ -172,11 +162,7 @@ end
 local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 	local function bake()
 		local ok, result = pcall(Bake.bakeSelected)
-		if ok then
-			reportBake(result)
-		else
-			Status.post("error", `Bake failed: {result}`)
-		end
+		Bake.report(ok, result, "Baked", "Those tiles are already baked.")
 	end
 	local function unbake()
 		local ok, result = pcall(Bake.unbakeSelected)

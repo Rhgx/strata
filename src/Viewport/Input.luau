@@ -135,9 +135,10 @@ function Input.dragRadius(mouse: PluginMouse, drag: DragResize): number
 end
 
 --[[
-	Calls `onStep(1)` or `onStep(-1)` on Ctrl + Scroll over the 3D view while `active()` says so,
-	and holds the camera still for it. Returns the connections. Scrolling down (toward you) grows
-	and scrolling up shrinks, which reads as pulling the brush out and pushing it in.
+	Calls `onStep(1)` or `onStep(-1)` while `active()` says so, on Ctrl + Scroll over the 3D view
+	(holding the camera still for it) and on `]` and `[`. Returns the connections. Scrolling down
+	(toward you) grows and scrolling up shrinks, which reads as pulling the brush out and pushing
+	it in.
 ]]
 function Input.connectResize(mouse: PluginMouse, active: () -> boolean, onStep: (number) -> ()): { RBXScriptConnection }
 	local function onWheel(direction: number)
@@ -153,6 +154,16 @@ function Input.connectResize(mouse: PluginMouse, active: () -> boolean, onStep: 
 		end),
 		mouse.WheelBackward:Connect(function()
 			onWheel(1)
+		end),
+		Input.onKey(function(input: Key)
+			if not active() or UserInputService:GetFocusedTextBox() then
+				return
+			end
+			if input.KeyCode == Enum.KeyCode.LeftBracket then
+				onStep(-1)
+			elseif input.KeyCode == Enum.KeyCode.RightBracket then
+				onStep(1)
+			end
 		end),
 	}
 end

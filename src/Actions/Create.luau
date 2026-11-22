@@ -21,6 +21,7 @@ local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Settings = require(script.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.State.Status)
+local Format = require(script.Parent.Parent.State.Format)
 local Recording = require(script.Parent.Recording)
 
 type Face = PartFaces.Face
@@ -71,10 +72,6 @@ local Create = {}
 
 Create.MAX_TILES_PER_PART = MAX_TILES_PER_PART
 
-local function plural(n: number, word: string): string
-	return if n == 1 then `1 {word}` else `{n} {word}s`
-end
-
 local creating = false
 
 --[[
@@ -105,19 +102,19 @@ function Create.report(ok: boolean, result: Result | string, picked: number?)
 	end
 	local notes = {}
 	if result.skipped > 0 then
-		table.insert(notes, "skipped " .. plural(result.skipped, "unsupported part"))
+		table.insert(notes, "skipped " .. Format.plural(result.skipped, "unsupported part"))
 	end
 	if result.skippedFaces > 0 then
-		table.insert(notes, "skipped " .. plural(result.skippedFaces, "face") .. " under 0.5 studs")
+		table.insert(notes, "skipped " .. Format.plural(result.skippedFaces, "face") .. " under 0.5 studs")
 	end
 	local suffix = if #notes > 0 then " (" .. table.concat(notes, "; ") .. ")" else ""
-	local source = if picked then plural(picked, "face") else plural(result.parts, "part")
+	local source = if picked then Format.plural(picked, "face") else Format.plural(result.parts, "part")
 	if result.created == 0 then
 		Status.post("warning", `Nothing created{suffix}.`)
 	elseif result.bakeFailed > 0 then
 		Status.post("error", `Created {result.created}; {result.bakeFailed} failed to bake: {result.bakeError}`)
 	else
-		Status.post("success", `Created {plural(result.created, "tile")} from {source}{suffix}.`)
+		Status.post("success", `Created {Format.plural(result.created, "tile")} from {source}{suffix}.`)
 	end
 end
 

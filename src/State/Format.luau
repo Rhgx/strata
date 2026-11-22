@@ -1,6 +1,6 @@
 --!strict
--- Small text helpers for UI and status strings: natural plurals instead of "(s)", and colors as
--- text.
+-- Small text helpers for the panel, status messages and 3D labels: natural plurals instead of
+-- "(s)", stud lengths, and colors as text.
 
 local Format = {}
 
@@ -38,6 +38,11 @@ end
 function Format.count(n: number): string
 	local formatted = tostring(math.floor(n)):reverse():gsub("(%d%d%d)", "%1,"):reverse()
 	return (formatted:gsub("^,", ""))
+end
+
+-- 8 -> "8"; 2.25 -> "2.3": a length in studs, with one decimal only when it has one.
+function Format.studs(value: number): string
+	return if value == math.floor(value) then tostring(value) else string.format("%.1f", value)
 end
 
 -- (1, "tile") -> "1 tile"; (3, "tile") -> "3 tiles"; (2, "face", "faces").

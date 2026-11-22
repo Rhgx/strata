@@ -8,9 +8,8 @@ local Settings = require(script.Parent.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.Parent.State.Status)
 local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
-local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Icons = require(script.Parent.Parent.Icons)
-local Format = require(script.Parent.Parent.Format)
+local Format = require(script.Parent.Parent.Parent.State.Format)
 local Rows = require(script.Parent.Parent.Rows)
 
 local e = React.createElement
@@ -131,13 +130,7 @@ local function RebakeButton(props: { LayoutOrder: number })
 	local function rebake()
 		setConfirming(false)
 		local ok, result = pcall(Bake.rebakeAll)
-		if not ok then
-			Status.post("error", `Rebake failed: {result}`)
-		elseif result.failed > 0 then
-			Status.post("error", `Rebaked {result.baked}, {result.failed} failed: {result.firstError}`)
-		else
-			Status.post("success", `Rebaked {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
-		end
+		Bake.report(ok, result, "Rebaked")
 	end
 
 	return Rows.button(

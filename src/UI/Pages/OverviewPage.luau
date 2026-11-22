@@ -8,10 +8,9 @@ local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
 local Session = require(script.Parent.Parent.Parent.Scene.Session)
-local Status = require(script.Parent.Parent.Parent.State.Status)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
-local Format = require(script.Parent.Parent.Format)
+local Format = require(script.Parent.Parent.Parent.State.Format)
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 
@@ -24,13 +23,7 @@ local function bakeAllButton(layoutOrder: number, info: Query.PlaceInfo)
 		`Bake all ({unbaked})`,
 		function()
 			local ok, result = pcall(Bake.bakeAll)
-			if not ok then
-				Status.post("error", `Bake failed: {result}`)
-			elseif result.failed > 0 then
-				Status.post("error", `Baked {result.baked}, {result.failed} failed: {result.firstError}`)
-			else
-				Status.post("success", `Baked {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
-			end
+			Bake.report(ok, result, "Baked")
 		end,
 		"**Bake every unbaked tile** in this place.\n\n"
 			.. "Merges each tile into a single union.\n\n"
