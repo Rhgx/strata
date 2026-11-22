@@ -13,8 +13,8 @@ local Rows = require(script.Parent.Parent.Rows)
 
 local e = React.createElement
 
--- Leaves about 84 px for the action at the minimum panel width; every action fits in that.
-local KEY_WIDTH = 100
+-- Leaves about 96 px for the action at the minimum panel width; every action fits in that.
+local KEY_WIDTH = 88
 local KEY_GAP = 6
 local KEY_ROW_HEIGHT = 18
 
@@ -30,43 +30,45 @@ local QUICK_START = table.concat({
 	"4. <b>Stitch</b>: snap terrain edges onto roads, floors or walls.",
 }, "\n")
 
+-- Keys that work the same in every tool, listed once.
+local COMMON_KEYS: { KeyHint } = {
+	{ key = "Ctrl + Scroll", action = "Resize or Reach" },
+	{ key = "[ and ]", action = "Resize or Reach" },
+	{ key = "Esc", action = "Stop tool" },
+	{ key = "Ctrl + Z", action = "Undo a step" },
+}
+
 local PAINT_KEYS: { KeyHint } = {
 	{ key = "Left Drag", action = "Paint" },
 	{ key = "Ctrl", action = "Invert brush" },
-	{ key = "Ctrl + Click", action = "Pick height (Raise To)" },
 	{ key = "Shift", action = "Smooth" },
-	{ key = "Ctrl + Scroll", action = "Resize brush" },
+	{ key = "Ctrl + Click", action = "Pick height" },
 	{ key = "Alt + Drag", action = "Resize brush" },
 	{ key = "Alt + Right Click", action = "Pick axis" },
-	{ key = "Esc", action = "Stop tool" },
 }
 
 local MATERIAL_KEYS: { KeyHint } = {
 	{ key = "Left Drag", action = "Paint material" },
 	{ key = "Ctrl", action = "Erase" },
 	{ key = "Alt + Right Click", action = "Pick look" },
-	{ key = "Ctrl + Scroll", action = "Resize brush" },
-	{ key = "Esc", action = "Stop tool" },
 }
 
 local MESH_KEYS: { KeyHint } = {
-	{ key = "Left Drag", action = "Mark points / cut holes" },
+	{ key = "Left Drag", action = "Mark or cut" },
 	{ key = "Ctrl", action = "Restore" },
-	{ key = "Click", action = "Toggle a point (Simplify)" },
+	{ key = "Click", action = "Toggle a point" },
 	{ key = "Enter or X", action = "Apply marks" },
-	{ key = "Ctrl + Scroll", action = "Resize brush" },
-	{ key = "Esc", action = "Clear marks, then stop" },
+	{ key = "Esc", action = "Clear marks first" },
 }
 
 local STITCH_KEYS: { KeyHint } = {
-	{ key = "Left Click", action = "Stitch part" },
-	{ key = "Ctrl + Scroll", action = "Change reach" },
-	{ key = "Esc", action = "Stop tool" },
+	{ key = "Click a part", action = "Stitch its edges" },
 }
 
 local PICK_KEYS: { KeyHint } = {
-	{ key = "Left Click", action = "Pick or unpick" },
-	{ key = "Esc", action = "Stop tool" },
+	{ key = "Click a face", action = "Pick or unpick" },
+	{ key = "Enter", action = "Create" },
+	{ key = "Esc", action = "Clear picks first" },
 }
 
 -- Single-line key/action row built from plain host Frames and Labels.
@@ -119,19 +121,20 @@ local function HelpPage()
 		end, "**Close help** (`Esc`)."),
 		QuickStartHeading = Rows.section(2, "Quick start"),
 		QuickStart = Rows.paragraph(3, QUICK_START),
-		PaintHeading = Rows.section(4, "Paint shortcuts"),
-		PaintKeys = keyTable(5, PAINT_KEYS),
-		MaterialHeading = Rows.section(6, "Material shortcuts"),
-		MaterialKeys = keyTable(7, MATERIAL_KEYS),
-		MeshHeading = Rows.section(8, "Mesh shortcuts"),
-		MeshKeys = keyTable(9, MESH_KEYS),
-		StitchHeading = Rows.section(10, "Stitch shortcuts"),
-		StitchKeys = keyTable(11, STITCH_KEYS),
-		PickHeading = Rows.section(12, "Pick faces shortcuts"),
-		PickKeys = keyTable(13, PICK_KEYS),
-		BracketNote = Rows.paragraph(14, "[ and ] also resize the brush or change reach.", "dimmed"),
-		TipDivider = Rows.divider(15),
-		Tip = Rows.paragraph(16, "Hover any control for details. Ctrl + Z undoes each step. The gear opens Settings.", "dimmed"),
+		CommonHeading = Rows.section(4, "Every tool"),
+		CommonKeys = keyTable(5, COMMON_KEYS),
+		PaintHeading = Rows.section(6, "Sculpt brushes"),
+		PaintKeys = keyTable(7, PAINT_KEYS),
+		MaterialHeading = Rows.section(8, "Material"),
+		MaterialKeys = keyTable(9, MATERIAL_KEYS),
+		MeshHeading = Rows.section(10, "Mesh"),
+		MeshKeys = keyTable(11, MESH_KEYS),
+		StitchHeading = Rows.section(12, "Stitch"),
+		StitchKeys = keyTable(13, STITCH_KEYS),
+		PickHeading = Rows.section(14, "Pick faces"),
+		PickKeys = keyTable(15, PICK_KEYS),
+		TipDivider = Rows.divider(16),
+		Tip = Rows.paragraph(17, "Hover any control for details. The gear opens Settings.", "dimmed"),
 	})
 end
 

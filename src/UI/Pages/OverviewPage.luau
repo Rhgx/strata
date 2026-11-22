@@ -2,13 +2,20 @@
 -- Shown when no tool runs and nothing usable is selected: how to start, and the place's tiles.
 local Selection = game:GetService("Selection")
 
+local Packages = script.Parent.Parent.Parent.Parent.Packages
+local React = require(Packages.React)
+local StudioComponents = require(Packages.StudioComponents)
+
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
+local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Status = require(script.Parent.Parent.Parent.State.Status)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Bake = require(script.Parent.Parent.Parent.Actions.Bake)
 local Format = require(script.Parent.Parent.Format)
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
+
+local e = React.createElement
 
 local function bakeAllButton(layoutOrder: number, info: Query.PlaceInfo)
 	local unbaked = info.total - info.baked
@@ -22,14 +29,15 @@ local function bakeAllButton(layoutOrder: number, info: Query.PlaceInfo)
 			elseif result.failed > 0 then
 				Status.post("error", `Baked {result.baked}, {result.failed} failed: {result.firstError}`)
 			else
-				Status.post("success", `Baked {Format.plural(result.baked, "tile")} into unions.`)
+				Status.post("success", `Baked {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
 			end
 		end,
 		"**Bake every unbaked tile** in this place.\n\n"
 			.. "Merges each tile into a single union.\n\n"
 			.. "> Run before publishing if `Bake automatically` is off.",
 		nil,
-		Icons.BakeAll
+		Icons.BakeAll,
+		true
 	)
 end
 
@@ -76,13 +84,44 @@ local function OverviewPage()
 			4,
 			"Baked",
 			if unbaked == 0 then "All baked" else `{info.baked} of {info.total}`,
-			nil,
+			-- Unbaked tiles are something to act on before publishing.
+			if unbaked == 0 then nil else "warning",
 			"**Tiles merged into unions.**\n\n"
 				.. "> Unbaked tiles are still editable wedges."
 		),
+		ActionsHeading = Rows.section(5, "Actions"),
+		Actions = Rows.grid(6, 2, {
+			SelectAll = Rows.withTooltip(
+				"**Select every tile** in this place, to edit them together on the tile page.",
+				e(StudioComponents.Button, {
+					Size = UDim2.fromScale(1, 1),
+					Text = "Select all",
+					Icon = Icons.SelectAll,
+					OnActivated = function()
+						local models: { Instance } = {}
+						for _, model in Session.models() do
+							table.insert(models, model)
+						end
+						Selection:Set(models)
+					end,
+				}),
+				1
+			),
+			Pick = Rows.withTooltip(
+				"**Pick part faces** in the 3D view to turn into more terrain.",
+				e(StudioComponents.Button, {
+					Size = UDim2.fromScale(1, 1),
+					Text = "Pick faces",
+					Icon = Icons.StartPickFaces,
+					OnActivated = function()
+						Settings.toggleTool("PickFaces")
+					end,
+				}),
+				2
+			),
+		}),
 		-- Only when there is something to bake; the Baked row already says "All baked".
-		BakeDivider = if unbaked > 0 then Rows.divider(5) else nil,
-		BakeAll = if unbaked > 0 then bakeAllButton(6, info) else nil,
+		BakeAll = if unbaked > 0 then bakeAllButton(7, info) else nil,
 	})
 end
 

@@ -102,7 +102,7 @@ local function idleText(settings: Settings.State, ctx: Context): string
 		elseif settings.paintSelectedOnly and ctx.info.count == 0 then
 			return "Select tiles to edit."
 		end
-		return if settings.meshMode == "Holes" then "Cutting holes. Ctrl restores." else "Removing points. Ctrl restores."
+		return if settings.meshMode == "Holes" then "Cutting holes. Ctrl restores." else "Mark points, then Enter or Apply."
 	elseif page == "pick" then
 		return "Pick faces, then Create."
 	elseif page == "stitch" then

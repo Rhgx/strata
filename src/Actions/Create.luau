@@ -20,6 +20,7 @@ local Units = require(script.Parent.Parent.Core.Units)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
 local Settings = require(script.Parent.Parent.State.Settings)
+local Status = require(script.Parent.Parent.State.Status)
 local Recording = require(script.Parent.Recording)
 
 type Face = PartFaces.Face
@@ -69,6 +70,56 @@ local TILES_PER_YIELD = 8
 local Create = {}
 
 Create.MAX_TILES_PER_PART = MAX_TILES_PER_PART
+
+local function plural(n: number, word: string): string
+	return if n == 1 then `1 {word}` else `{n} {word}s`
+end
+
+local creating = false
+
+--[[
+	Creates terrain from faces picked with Pick faces (the panel's Create button and Enter in
+	the 3D view), reports it, and stops the tool. A failure (such as a part over the tile limit)
+	keeps the tool and its picks, so they can be fixed and tried again. Ignored while a Create
+	from picks is still running. Yields.
+]]
+function Create.createPicked(power: number, tileSize: number, picks: { Pick }, stopTool: () -> ())
+	if creating or #picks == 0 then
+		return
+	end
+	creating = true
+	local ok, result = pcall(Create.fromPicks, power, tileSize, picks)
+	creating = false
+	Create.report(ok, result, #picks)
+	if ok then
+		stopTool()
+	end
+end
+
+-- Posts what a Create did to the status bar. `picked` is how many faces were picked (Pick
+-- faces), or nil for selected parts.
+function Create.report(ok: boolean, result: Result | string, picked: number?)
+	if not ok or typeof(result) == "string" then
+		Status.post("error", `Create failed: {result}`)
+		return
+	end
+	local notes = {}
+	if result.skipped > 0 then
+		table.insert(notes, "skipped " .. plural(result.skipped, "unsupported part"))
+	end
+	if result.skippedFaces > 0 then
+		table.insert(notes, "skipped " .. plural(result.skippedFaces, "face") .. " under 0.5 studs")
+	end
+	local suffix = if #notes > 0 then " (" .. table.concat(notes, "; ") .. ")" else ""
+	local source = if picked then plural(picked, "face") else plural(result.parts, "part")
+	if result.created == 0 then
+		Status.post("warning", `Nothing created{suffix}.`)
+	elseif result.bakeFailed > 0 then
+		Status.post("error", `Created {result.created}; {result.bakeFailed} failed to bake: {result.bakeError}`)
+	else
+		Status.post("success", `Created {plural(result.created, "tile")} from {source}{suffix}.`)
+	end
+end
 
 function Create.wedgesPerTile(power: number): number
 	local quads = bit32.lshift(1, power)

@@ -11,7 +11,7 @@ local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
 local ColorField = require(script.Parent.Parent.ColorField)
 local Dropdown = require(script.Parent.Parent.Dropdown)
-local Icons = require(script.Parent.Parent.Icons)
+local Accent = require(script.Parent.Parent.Accent)
 local Rows = require(script.Parent.Parent.Rows)
 
 local e = React.createElement
@@ -40,7 +40,7 @@ local function variantRow(settings: Settings.State)
 		table.insert(items, { Id = current, Text = `{current} (missing)` })
 	end
 	return Rows.property(
-		5,
+		6,
 		"Variant",
 		e(Dropdown, {
 			Items = items,
@@ -59,9 +59,16 @@ end
 
 local function MaterialPage(props: { settings: Settings.State })
 	local settings = props.settings
+	local theme = StudioComponents.useTheme()
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(1, "Material"),
+		Title = Rows.title(
+			1,
+			"Material",
+			Accent.tool("Material", theme),
+			Settings.stopViewportTool,
+			"**Stop the Material tool** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
+		),
 		Material = Rows.property(
 			5,
 			"Material",
@@ -151,17 +158,6 @@ local function MaterialPage(props: { settings: Settings.State })
 			end,
 			"**Limit the brush** to selected tiles.\n\n"
 				.. "When off, works on any terrain under the cursor."
-		),
-		StopDivider = Rows.divider(11),
-		Stop = Rows.button(
-			12,
-			"Stop painting",
-			Settings.stopViewportTool,
-			"**Stop the Material tool** and return to Studio.\n\n"
-				.. "Bakes edited tiles if `Bake automatically` is on.\n\n"
-				.. "> Shortcut: `Esc`.",
-			nil,
-			Icons.StopTool
 		),
 	}
 

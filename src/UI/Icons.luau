@@ -13,6 +13,8 @@ export type Icon = {
 	RectOffset: Vector2,
 	RectSize: Vector2,
 	UseThemeColor: boolean,
+	-- Overrides the theme's text color (the tool strip tints the brushes, see Accent).
+	Color: Color3?,
 }
 
 local BUTTON_SIZE = Vector2.new(16, 16)
@@ -64,6 +66,7 @@ return table.freeze({
 	ClearMarks = item("x"),
 	CopyAppearance = item("pipette"),
 	BakeAll = item("layers"),
+	SelectAll = item("box-select"),
 	Back = item("arrow-left"),
 	RoundFolds = item("radius"),
 	SplitTiles = item("grid-2x2"),

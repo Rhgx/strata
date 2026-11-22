@@ -9,7 +9,7 @@ local StudioComponents = require(Packages.StudioComponents)
 
 local PartFaces = require(script.Parent.Parent.Parent.Core.PartFaces)
 local Settings = require(script.Parent.Parent.Parent.State.Settings)
-local Status = require(script.Parent.Parent.Parent.State.Status)
+
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Create = require(script.Parent.Parent.Parent.Actions.Create)
 local PickFaceTool = require(script.Parent.Parent.Parent.Viewport.PickFaceTool)
@@ -49,28 +49,6 @@ local function usePicks(): { PickFaceTool.Pick }
 	return PickFaceTool.picks()
 end
 
-local function report(ok: boolean, result: Create.Result | string, picked: number?)
-	if not ok or typeof(result) == "string" then
-		Status.post("error", `Create failed: {result}`)
-		return
-	end
-	local notes = {}
-	if result.skipped > 0 then
-		table.insert(notes, "skipped " .. Format.plural(result.skipped, "unsupported part"))
-	end
-	if result.skippedFaces > 0 then
-		table.insert(notes, "skipped " .. Format.plural(result.skippedFaces, "face") .. " under 0.5 studs")
-	end
-	local suffix = if #notes > 0 then " (" .. table.concat(notes, "; ") .. ")" else ""
-	local source = if picked then Format.plural(picked, "face") else Format.plural(result.parts, "part")
-	if result.created == 0 then
-		Status.post("warning", `Nothing created{suffix}.`)
-	elseif result.bakeFailed > 0 then
-		Status.post("error", `Created {result.created}; {result.bakeFailed} failed to bake: {result.bakeError}`)
-	else
-		Status.post("success", `Created {Format.plural(result.created, "tile")} from {source}{suffix}.`)
-	end
-end
 
 export type Props = {
 	settings: Settings.State,
@@ -151,11 +129,9 @@ local function CreatePage(props: Props)
 				Disabled = plan.faces == 0 or tooMany,
 				OnActivated = function()
 					if picking then
-						local ok, result = pcall(Create.fromPicks, settings.power, settings.tileSize, picks)
-						report(ok, result, #picks)
-						Settings.stopViewportTool()
+						Create.createPicked(settings.power, settings.tileSize, picks, Settings.stopViewportTool)
 					else
-						report(pcall(Create.fromSelection, settings.power, settings.tileSize, settings.faces))
+						Create.report(pcall(Create.fromSelection, settings.power, settings.tileSize, settings.faces))
 					end
 				end,
 			}),
@@ -165,10 +141,14 @@ local function CreatePage(props: Props)
 	}
 
 	if picking then
-		children.Title = Rows.title(1, "Pick faces")
-		if #picks == 0 then
-			children.Hint = Rows.paragraph(2, "Click part faces in the 3D view, then click Create.", "dimmed")
-		else
+		children.Title = Rows.title(
+			1,
+			"Pick faces",
+			nil,
+			Settings.stopViewportTool,
+			"**Stop picking** (`Esc`).\n\nClears any picked faces."
+		)
+		if #picks > 0 then
 			-- The Picked row ends in a Clear button. Its tooltip is a sibling of the row's, not
 			-- nested inside it, since nested tooltips would both show.
 			children.Picked = e("Frame", {
@@ -206,16 +186,6 @@ local function CreatePage(props: Props)
 				}),
 			})
 		end
-		children.Stop = Rows.button(
-			12,
-			"Stop picking",
-			Settings.stopViewportTool,
-			"**Stop picking** and return to Studio.\n\n"
-				.. "Clears any picked faces.\n\n"
-				.. "> Shortcut: `Esc`.",
-			nil,
-			Icons.StopTool
-		)
 	else
 		children.Selected = Rows.value(
 			1,

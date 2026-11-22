@@ -8,6 +8,7 @@ local Settings = require(script.Parent.Parent.Parent.State.Settings)
 local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
 local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
+local Accent = require(script.Parent.Parent.Accent)
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 local Dropdown = require(script.Parent.Parent.Dropdown)
@@ -44,12 +45,27 @@ local function slider(value: number, min: number, max: number, onChanged: (numbe
 	})
 end
 
+-- The tool each brush mode belongs to, for its color.
+local TOOL_OF: { [Settings.BrushMode]: Settings.Tool } = {
+	Raise = "Raise",
+	Lower = "Lower",
+	Smooth = "Smooth",
+	RaiseTo = "RaiseTo",
+}
+
 local function BrushPage(props: { settings: Settings.State })
 	local settings = props.settings
 	local mode: Settings.BrushMode = settings.mode
+	local theme = StudioComponents.useTheme()
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(1, Settings.modeLabel(mode)),
+		Title = Rows.title(
+			1,
+			Settings.modeLabel(mode),
+			Accent.tool(TOOL_OF[mode], theme),
+			Settings.stopViewportTool,
+			"**Stop painting** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
+		),
 		Radius = Rows.property(
 			3,
 			"Radius",
@@ -99,17 +115,6 @@ local function BrushPage(props: { settings: Settings.State })
 			end,
 			"**Limit brush** to selected tiles.\n\n"
 				.. "When off, paints any terrain under the cursor."
-		),
-		StopDivider = Rows.divider(12),
-		Stop = Rows.button(
-			13,
-			"Stop painting",
-			Settings.stopViewportTool,
-			"**Stop painting** and return to Studio.\n\n"
-				.. "Bakes edited tiles if `Bake automatically` is on.\n\n"
-				.. "> Shortcut: `Esc`.",
-			nil,
-			Icons.StopTool
 		),
 	}
 

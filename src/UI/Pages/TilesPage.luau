@@ -106,11 +106,12 @@ local function actionButton(
 	icon: Icons.Icon,
 	disabled: boolean,
 	onActivated: () -> (),
-	tooltip: string
+	tooltip: string,
+	primary: boolean?
 )
 	return Rows.withTooltip(
 		tooltip,
-		e(StudioComponents.Button, {
+		e(if primary and not disabled then StudioComponents.MainButton else StudioComponents.Button, {
 			Size = UDim2.fromScale(1, 1),
 			Text = text,
 			Icon = icon,
@@ -138,7 +139,7 @@ local function reportBake(result: Session.BakeResult)
 	elseif result.baked == 0 then
 		Status.post("warning", "Those tiles are already baked.")
 	else
-		Status.post("success", `Baked {Format.plural(result.baked, "tile")} into unions.`)
+		Status.post("success", `Baked {Format.plural(result.baked, "tile")}{Session.savings(result)}.`)
 	end
 end
 
@@ -189,13 +190,14 @@ local function bakeRow(layoutOrder: number, info: Query.SelectionInfo)
 	local unbakeTip = "**Unbake tiles** into editable wedges.\n\n" .. "> Painting a baked tile unbakes it automatically."
 
 	local unbaked = info.count - info.baked
+	-- Baking is what an edited selection leads to, so it is the page's main (blue) button.
 	if info.baked == 0 then
-		return Rows.button(layoutOrder, "Bake", bake, bakeTip, false, Icons.BakeTiles)
+		return Rows.button(layoutOrder, "Bake", bake, bakeTip, false, Icons.BakeTiles, true)
 	elseif unbaked == 0 then
 		return Rows.button(layoutOrder, "Unbake", unbake, unbakeTip, false, Icons.UnbakeTiles)
 	end
 	return Rows.grid(layoutOrder, 2, {
-		Bake = actionButton(1, `Bake ({unbaked})`, Icons.BakeTiles, false, bake, bakeTip),
+		Bake = actionButton(1, `Bake ({unbaked})`, Icons.BakeTiles, false, bake, bakeTip, true),
 		Unbake = actionButton(2, `Unbake ({info.baked})`, Icons.UnbakeTiles, false, unbake, unbakeTip),
 	})
 end

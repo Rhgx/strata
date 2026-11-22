@@ -1,5 +1,6 @@
 --!strict
--- Options of the running Mesh tool: Simplify (mark points, preview, apply) or Cut holes.
+-- Options of the running Mesh tool: Simplify (mark points, preview, apply) or Cut holes. The marks
+-- block (result, Apply, Clear) only shows while points are marked.
 local Packages = script.Parent.Parent.Parent.Parent.Packages
 local React = require(Packages.React)
 local StudioComponents = require(Packages.StudioComponents)
@@ -12,6 +13,7 @@ local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local MeshStage = require(script.Parent.Parent.Parent.Scene.MeshStage)
 local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
 local Format = require(script.Parent.Parent.Format)
+local Accent = require(script.Parent.Parent.Accent)
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 
@@ -67,8 +69,10 @@ end
 
 local function MeshPage(props: { settings: Settings.State })
 	local settings = props.settings
+	local theme = StudioComponents.useTheme()
 	local holes = settings.meshMode == "Holes"
 	local selected = #Query.selectedModels()
+	local hasTiles = #Session.models() > 0
 
 	-- Re-render when points are marked or cleared in the 3D view.
 	local _, setStageVersion = React.useState(MeshStage.version())
@@ -79,17 +83,26 @@ local function MeshPage(props: { settings: Settings.State })
 	end, {})
 	local marked = not MeshStage.isEmpty()
 	local busy, setBusy = React.useState(false)
+	-- Select flat finishes after a yield, possibly after the page is gone.
+	local mounted = React.useRef(true)
+	React.useEffect(function()
+		mounted.current = true
+		return function()
+			mounted.current = false
+		end
+	end, {})
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(1, "Mesh"),
-		Mode = modeRow(2, settings),
-		Hint = Rows.paragraph(
-			4,
-			if holes
-				then "Drag to delete triangles. Hold Ctrl to restore them."
-				else "Drag to mark points, Ctrl to mark removed ones back. Click toggles one point.",
-			"dimmed"
+		-- Cutting holes shows in red in 3D, like the Lower brush.
+		Title = Rows.title(
+			1,
+			"Mesh",
+			Accent.tool(if holes then "Lower" else "Mesh", theme),
+			Settings.stopViewportTool,
+			"**Stop the Mesh tool** (`Esc`).\n\n"
+				.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on."
 		),
+		Mode = modeRow(2, settings),
 		Radius = Rows.property(
 			5,
 			"Radius",
@@ -107,7 +120,9 @@ local function MeshPage(props: { settings: Settings.State })
 				end,
 			}),
 			"**Brush size** in studs.\n\n"
-				.. (if holes then "The triangle under the cursor is always included." else "A click without dragging marks just the nearest point.")
+				.. (if holes
+					then "The triangle under the cursor is always included."
+					else "Drag to mark points; a click without dragging marks just the nearest point.")
 				.. "\n\n> Resize in 3D: `Ctrl + Scroll` or `[` and `]`."
 		),
 		Fine = if holes
@@ -137,132 +152,136 @@ local function MeshPage(props: { settings: Settings.State })
 	}
 
 	if not holes then
-		local before, after = MeshStage.counts()
-		children.Result = Rows.value(
-			8,
-			"Result",
-			if marked then `{Format.count(before)} to {Format.count(after)} triangles` else "No points marked",
-			if marked then nil else "dimmed",
-			"**Triangles now and after Apply**, over every tile with marked points.\n\n"
-				.. "The orange lines in 3D are the edges those tiles would gain."
-		)
-		children.Commit = Rows.grid(9, 2, {
-			Apply = Rows.withTooltip(
-				"**Apply the marked points** as one undo step.\n\n> Also `Enter` or `X` in 3D.",
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = "Apply",
-					Icon = Icons.ApplyMarks,
-					Disabled = not marked,
-					OnActivated = function()
-						run(function()
-							local tiles, points = MeshActions.applyMarks()
-							if points > 0 then
-								Status.post("success", `Changed {Format.plural(points, "point")} on {Format.plural(tiles, "tile")}.`)
-							end
-						end)
-					end,
+		-- Select flat and Restore all work on the selection, or every tile when none is selected.
+		local scopeText = if selected > 0
+			then `the {Format.plural(selected, "selected tile")}`
+			elseif settings.paintSelectedOnly then "the selected tiles"
+			else "every tile"
+		local noScope = not hasTiles or (selected == 0 and settings.paintSelectedOnly)
+		children.Auto = Rows.collapsible(
+			10,
+			"auto-simplify",
+			"Auto-simplify",
+			"**Mark points in bulk**: every point on flat enough ground, or every removed point.\n\n> Click to show or hide.",
+			{
+				Angle = Rows.property(
+					1,
+					"Max angle",
+					e(StudioComponents.NumericInput, {
+						Value = settings.simplifyAngle,
+						Min = Settings.SIMPLIFY_ANGLE_MIN,
+						Max = Settings.SIMPLIFY_ANGLE_MAX,
+						Step = 1,
+						Slider = true,
+						OnValidChanged = function(value: number)
+							Settings.update(function(s)
+								s.simplifyAngle = value
+							end)
+						end,
+					}),
+					"**How far the surface may bend**, in degrees, where points go.\n\n"
+						.. "- **0**: perfectly flat ground only.\n"
+						.. "- **5 to 15**: gentle slopes simplify too.\n\n"
+						.. "> Painted borders and hole outlines keep their points."
+				),
+				Buttons = Rows.grid(2, 2, {
+					Flat = Rows.withTooltip(
+						`**Mark flat points** on {scopeText} within \`Max angle\`.\n\nCheck the preview, then \`Apply\`.`,
+						e(StudioComponents.Button, {
+							Size = UDim2.fromScale(1, 1),
+							Text = if busy then "Working..." else "Select flat",
+							Icon = Icons.AutoSimplify,
+							Disabled = noScope or busy,
+							OnActivated = function()
+								-- Marking yields between batches, so it runs outside the click handler.
+								setBusy(true)
+								task.spawn(function()
+									run(function()
+										local tiles, points = MeshActions.selectFlat(settings.simplifyAngle)
+										if not mounted.current then
+											return
+										elseif points == 0 then
+											Status.post("warning", "No points are flat enough within that angle.")
+										else
+											Status.post(
+												"success",
+												`Marked {Format.plural(points, "point")} on {Format.plural(tiles, "tile")}. Apply to keep them.`
+											)
+										end
+									end)
+									if mounted.current then
+										setBusy(false)
+									end
+								end)
+							end,
+						}),
+						1
+					),
+					Restore = Rows.withTooltip(
+						`**Mark every removed point** on {scopeText} to come back.\n\nCheck the preview, then \`Apply\`.`,
+						e(StudioComponents.Button, {
+							Size = UDim2.fromScale(1, 1),
+							Text = "Restore all",
+							Icon = Icons.RestorePoints,
+							Disabled = noScope,
+							OnActivated = function()
+								if MeshActions.markRestoreAll() == 0 then
+									Status.post("warning", "No removed points to restore.")
+								end
+							end,
+						}),
+						2
+					),
 				}),
-				1
-			),
-			Clear = Rows.withTooltip(
-				"**Drop the marks** without changing anything.\n\n> Also `Esc` in 3D.",
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = "Clear",
-					Icon = Icons.ClearMarks,
-					Disabled = not marked,
-					OnActivated = MeshStage.clear,
-				}),
-				2
-			),
-		})
-		children.AutoHeading = Rows.section(10, "Auto-simplify")
-		children.AutoNote = Rows.paragraph(
-			11,
-			if selected > 0
-				then `Marks the points of {Format.plural(selected, "selected tile")} that sit on flat enough ground.`
-				else "Select tiles to mark the points that sit on flat enough ground.",
-			"dimmed"
+			}
 		)
-		children.Angle = Rows.property(
-			12,
-			"Max angle",
-			e(StudioComponents.NumericInput, {
-				Value = settings.simplifyAngle,
-				Min = Settings.SIMPLIFY_ANGLE_MIN,
-				Max = Settings.SIMPLIFY_ANGLE_MAX,
-				Step = 1,
-				Slider = true,
-				OnValidChanged = function(value: number)
-					Settings.update(function(s)
-						s.simplifyAngle = value
-					end)
-				end,
-			}),
-			"**How far the surface may bend**, in degrees, where points go.\n\n"
-				.. "- **0**: perfectly flat ground only.\n"
-				.. "- **5 to 15**: gentle slopes simplify too.\n\n"
-				.. "> Painted borders and hole outlines keep their points."
-		)
-		children.Auto = Rows.grid(13, 2, {
-			Flat = Rows.withTooltip(
-				"**Mark flat points** on the selected tiles within `Max angle`.\n\nCheck the preview, then `Apply`.",
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = if busy then "Working..." else "Select flat",
-					Icon = Icons.AutoSimplify,
-					Disabled = selected == 0 or busy,
-					OnActivated = function()
-						-- Marking yields between batches, so it runs outside the click handler.
-						setBusy(true)
-						task.spawn(function()
+
+		-- Below Auto-simplify, so Select flat never moves under the cursor when marks appear.
+		if marked then
+			local before, after = MeshStage.counts()
+			children.PendingDivider = Rows.divider(12)
+			children.Result = Rows.value(
+				13,
+				"Result",
+				`{Format.count(before)} to {Format.count(after)} tris`,
+				nil,
+				"**Triangles now and after Apply**, over every tile with marked points.\n\n"
+					.. "The orange lines in 3D are the edges those tiles would gain."
+			)
+			children.Commit = Rows.grid(14, 2, {
+				Apply = Rows.withTooltip(
+					"**Apply the marked points** as one undo step.\n\n> Also `Enter` or `X` in 3D.",
+					e(StudioComponents.MainButton, {
+						Size = UDim2.fromScale(1, 1),
+						Text = "Apply",
+						Icon = Icons.ApplyMarks,
+						OnActivated = function()
 							run(function()
-								local tiles, points = MeshActions.selectFlat(settings.simplifyAngle)
-								if points == 0 then
-									Status.post("warning", "No points are flat enough within that angle.")
-								else
-									Status.post("success", `Marked {Format.plural(points, "point")} on {Format.plural(tiles, "tile")}. Apply to keep them.`)
+								local tiles, points = MeshActions.applyMarks()
+								if points > 0 then
+									Status.post("success", `Changed {Format.plural(points, "point")} on {Format.plural(tiles, "tile")}.`)
 								end
 							end)
-							setBusy(false)
-						end)
-					end,
-				}),
-				1
-			),
-			Restore = Rows.withTooltip(
-				"**Mark every removed point** of the selected tiles to come back.\n\nCheck the preview, then `Apply`.",
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = "Restore all",
-					Icon = Icons.RestorePoints,
-					Disabled = selected == 0,
-					OnActivated = function()
-						if MeshActions.markRestoreAll() == 0 then
-							Status.post("warning", "The selected tiles have no removed points.")
-						end
-					end,
-				}),
-				2
-			),
-		})
+						end,
+					}),
+					1
+				),
+				Clear = Rows.withTooltip(
+					"**Drop the marks** without changing anything.\n\n> Also `Esc` in 3D.",
+					e(StudioComponents.Button, {
+						Size = UDim2.fromScale(1, 1),
+						Text = "Clear",
+						Icon = Icons.ClearMarks,
+						OnActivated = MeshStage.clear,
+					}),
+					2
+				),
+			})
+		end
 	end
 
-	children.StopDivider = Rows.divider(14)
-	children.Stop = Rows.button(
-		15,
-		"Stop",
-		Settings.stopViewportTool,
-		"**Stop the Mesh tool** and return to Studio.\n\n"
-			.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on.\n\n"
-			.. "> Shortcut: `Esc`.",
-		nil,
-		Icons.StopTool
-	)
-
 	-- Say so when a drag would do nothing, instead of failing silently.
-	if #Session.models() == 0 then
+	if not hasTiles then
 		children.Warning = Rows.paragraph(3, "No terrain yet. Select parts or use Pick faces.", "warning")
 	elseif settings.paintSelectedOnly and selected == 0 then
 		children.Warning = Rows.paragraph(3, "No tiles selected. Select tiles or turn off Selected only.", "warning")

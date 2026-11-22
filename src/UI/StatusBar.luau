@@ -11,6 +11,7 @@ local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(script.Parent.Parent.State.Settings)
 local Status = require(script.Parent.Parent.State.Status)
+local Accent = require(script.Parent.Accent)
 local Icons = require(script.Parent.Icons)
 local Tooltip = require(script.Parent.Tooltip)
 
@@ -20,10 +21,12 @@ local HEIGHT = 24
 local BUTTON_SIZE = 22
 local BUTTON_GAP = 4
 
+-- Success is green (Accent.success): Studio's theme has no success color.
 local KIND_COLORS: { [Status.Kind]: Enum.StudioStyleGuideColor } = {
 	success = Enum.StudioStyleGuideColor.MainText,
 	warning = Enum.StudioStyleGuideColor.WarningText,
 	error = Enum.StudioStyleGuideColor.ErrorText,
+	progress = Enum.StudioStyleGuideColor.MainText,
 }
 
 local function useStatus(): Status.Message?
@@ -99,6 +102,7 @@ local function StatusBar(props: Props)
 					TextXAlignment = Enum.TextXAlignment.Left,
 					TextTruncate = Enum.TextTruncate.AtEnd,
 					TextColorStyle = color,
+					TextColor3 = if message and message.kind == "success" then Accent.success(theme) else nil,
 				}),
 				-- Clicking a result dismisses it (errors otherwise stay until the next action).
 				Dismiss = if message

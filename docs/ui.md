@@ -6,14 +6,14 @@ Strata's panel (`src/UI/`) is built with React-Lua, `StudioComponents`, and Luci
 
 The panel is divided into three vertical regions:
 
-1. **Tool strip (`src/UI/ToolStrip.luau`)**: a 30 px pinned bar at the top with the eight viewport tools (also on the ribbon when `Tools on Plugins ribbon` is on in Settings) (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, `Mesh`, a vertical divider, then `Pick faces` and `Stitch`) as 24x24 icon buttons so tools stay one click away even when Studio is not on the Plugins ribbon tab. Hidden while an overlay (`Settings` or `Help`) is open.
+1. **Tool strip (`src/UI/ToolStrip.luau`)**: a 30 px pinned bar at the top with the eight viewport tools (also on the ribbon when `Tools on Plugins ribbon` is on in Settings) (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, `Mesh`, a vertical divider, then `Pick faces` and `Stitch`) as 24x24 icon buttons so tools stay one click away even when Studio is not on the Plugins ribbon tab. The six brush icons are tinted with their tool color (see Color below); the running tool's button keeps the theme's text color on its highlight. Hidden while an overlay (`Settings` or `Help`) is open.
 2. **Context page (`src/UI/Pages/`)**: occupies the middle area and switches automatically based on what the user is doing, in this priority order:
-   - `SettingsPage` or `HelpPage` when `settings.overlay` is `"settings"` or `"help"`.
-   - Active viewport tool: `BrushPage` (`painting`), `MaterialPage` (`coloring`), `CreatePage` in pick mode (`picking`), or `StitchPage` (`stitching`).
+   - `SettingsPage` or `HelpPage` when `settings.overlay` is `"settings"` or `"help"`. Settings has three tabs (`Edges`, `Baking`, `Interface`) pinned under its header with a full-width divider; only the tab's rows scroll, each tab starts at the top, and the last tab opened is remembered until Studio closes. `Baking` holds `General` (auto-bake, smoothing) and `Optimization` (`Simplify`, `Tolerance`, `Simplify straight edges`, `Plain Part for flat tiles`, `No shadow on flat tiles`), then `Rebake all (N)`, which bakes every tile again in one undo step so changed options reach tiles baked before (over 20 tiles it asks for a second click within 4 seconds).
+   - Active viewport tool: `BrushPage` (`painting`), `MaterialPage` (`coloring`), `MeshPage` (`meshing`), `CreatePage` in pick mode (`picking`), or `StitchPage` (`stitching`). Each starts with `Rows.title`: a 3x14 px bar in the tool's color, the tool's name, and an icon-only Stop button on the right (tooltip with `Esc`), so stopping takes no row of its own. The Mesh page in `Simplify` mode shows `Radius` and `Selected only`, then a collapsed `Auto-simplify` section (`Max angle`, `Select flat`, `Restore all`, which act on the selected tiles or every tile when none is selected), and only while points are marked, a `Result` row (`768 to 12 tris`) with `Apply` (the main button) and `Clear` below it, so `Select flat` never moves under the cursor.
    - Studio selection: `TilesPage` when at least one displacement tile is selected (even if normal parts are also selected, since `Sew` uses them), or `CreatePage` when eligible block/wedge parts are selected.
-   - Fallback: `OverviewPage` showing place tile and baked counts plus a `Bake all` button (or getting-started guidance if the place has no terrain yet).
+   - Fallback: `OverviewPage` showing place tile and baked counts (unbaked counts in `WarningText`), `Select all` and `Pick faces` actions, and `Bake all (N)` as the main button when anything is unbaked (or getting-started guidance if the place has no terrain yet).
    Each page is keyed by its page name so switching contexts always resets scroll position to the top.
-3. **Status bar (`src/UI/StatusBar.luau`)**: a 24 px pinned bar at the bottom displaying the latest `State/Status` message (colored as `MainText` for success, `WarningText` for warnings, or `ErrorText` for errors; clickable to dismiss; full text shown in its tooltip) or a context-aware idle hint when no status message is active. The right side holds the Settings gear and Help `?` overlay toggle buttons.
+3. **Status bar (`src/UI/StatusBar.luau`)**: a 24 px pinned bar at the bottom displaying the latest `State/Status` message (green for success, `WarningText` for warnings, `ErrorText` for errors and `MainText` for progress such as `Baking 3 of 12...`; clickable to dismiss; full text shown in its tooltip) or a context-aware idle hint when no status message is active. The right side holds the Settings gear and Help `?` overlay toggle buttons.
 
 ### Reactive hooks and helpers
 
@@ -22,15 +22,25 @@ The panel is divided into three vertical regions:
 - `src/UI/Icons.luau`: wraps `Lucide.GetAsset(name, 48)` with theme tinting (`16x16` for the tool strip and status bar; `14x14` for page buttons and dropdown items).
 - `src/UI/Format.luau`: comma-grouped counts (`12,345`), natural plurals (`1 tile` / `3 tiles`), and color hex / `"R, G, B"` parsing and formatting.
 
+## Color (`src/UI/Accent.luau`)
+
+The panel keeps Studio's neutral theme and spends color on three things only:
+
+- **Tool identity**: each brush has one color, the same hue as its cursor in the 3D view (Raise green, Lower red, Smooth blue, Raise To amber, Material teal, Mesh orange; Pick faces and Stitch stay neutral). It tints the tool strip icon and the bar in the tool page's title. Cut holes uses Lower's red, as in 3D.
+- **Primary actions**: Studio's own `MainButton` blue (see `Rows.button`).
+- **Feedback**: green success text in the status bar, `WarningText` and `ErrorText` for the rest.
+
+Light themes get darker variants of each color for contrast. The theme is told apart by the brightness of `MainBackground`, so custom themes work too. Section headings stay `DimmedText`, and there are no colored backgrounds, gradients or glows.
+
 ## Shared row helpers (`src/UI/Rows.luau`)
 
 Pages are composed from layout helpers in `src/UI/Rows.luau` (`LABEL_WIDTH = 66`, `ROW_HEIGHT = 22`, `BUTTON_HEIGHT = 24`, `GAP = 4`):
 
 - `Rows.page(children)`: `StudioComponents.ScrollFrame` oversized by 1 px on each side so the panel clips its outer border cleanly.
-- `Rows.section`, `Rows.title`, `Rows.header`, `Rows.divider`: dimmed group headings, bold tool titles, overlay headers with a back button, and 1 px themed dividers.
+- `Rows.section`, `Rows.title`, `Rows.header`, `Rows.divider`: dimmed group headings, tool page titles (color bar, name, Stop button), overlay headers with a back button, and 1 px themed dividers.
 - `Rows.property`, `Rows.value`: two-column label/control rows (66 px label column, control fills the remainder) wrapped in a whole-row hover tooltip when a tooltip is provided.
 - `Rows.grid`: equal-width `UIGridLayout` rows (kept to at most 2 columns for icon buttons at minimum panel width).
-- `Rows.button`, `Rows.checkbox`, `Rows.withTooltip`: full-width controls with hover tooltips.
+- `Rows.button`, `Rows.checkbox`, `Rows.withTooltip`: full-width controls with hover tooltips. `Rows.button`'s `primary` flag uses `StudioComponents.MainButton` (Studio's blue) for the one action a page leads to: `Create`, `Apply` (Mesh), `Bake` (Tiles) and `Bake all` (Overview), at most one per page.
 - `Rows.paragraph`, `Rows.heading`: wrapping themed `TextLabel`s using `AutomaticSize.Y` (since `StudioComponents.Label` does not auto-size).
 - `Rows.collapsible`: chevron-headed collapsible section whose open/closed state persists per section ID for the duration of the Studio session.
 
