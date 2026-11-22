@@ -14,7 +14,7 @@ Core -> State -> Scene -> Actions -> Viewport -> UI
 2. Creates the `StrataPanel` dock widget (`Enum.InitialDockState.Right`, 280x360 initial size, 220x200 minimum size, `ZIndexBehavior.Sibling`).
 3. Starts the background controllers: `Viewport/Toolbar`, `Scene/Session`, `Viewport/Activation`, `Viewport/BrushTool`, `Viewport/MaterialTool`, `Viewport/MeshTool`, `Viewport/RadiusPreview`, `Viewport/Input`, `Viewport/PickFaceTool`, `Viewport/StitchTool`, `Viewport/SampleTool`, and `Viewport/PointEditor`.
 4. Mounts `UI/App` into the dock widget via `ReactRoblox.createRoot` and `createPortal` only while `widget.Enabled` is true, so a closed panel does no work on Studio selection changes.
-5. When the widget closes, stops any active viewport tool and Edit points, closes any open overlay, and saves settings. On `plugin.Unloading`, saves settings, unmounts the React root, and runs every controller's cleanup callback.
+5. Persisted settings are debounced (`0.3` s) on change, merging only modified keys into `plugin:GetSetting("StrataSettings")` so untouched tabs or Play sessions never clobber saved values. When the widget closes, stops any active viewport tool and Edit points, closes any open overlay, and flushes pending setting writes. On `plugin.Unloading`, flushes pending setting writes, unmounts the React root, and runs every controller's cleanup callback.
 
 ## Layers and modules
 

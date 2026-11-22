@@ -115,6 +115,8 @@ export type State = {
 	bakeFlatNoShadow: boolean,
 	-- Display the key strip at the bottom of the viewport while a tool is active.
 	showKeyHints: boolean,
+	-- Display point dots inside the sculpt brush cursor (Raise, Lower, Smooth, Raise To).
+	showBrushDots: boolean,
 	-- Mirror tool buttons on Studio's Plugins ribbon tab (they always appear in the panel strip).
 	ribbonTools: boolean,
 }
@@ -253,6 +255,8 @@ local state: State = table.freeze({
 	-- Off by default so flat bridges, roofs, and plateaus keep their shadows.
 	bakeFlatNoShadow = false,
 	showKeyHints = true,
+	-- Off by default for a cleaner 3D view; the brush ring still dims when empty.
+	showBrushDots = false,
 	ribbonTools = false,
 })
 

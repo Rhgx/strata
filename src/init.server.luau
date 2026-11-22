@@ -24,6 +24,8 @@ local startMaterialTool = require(Viewport.MaterialTool)
 local App = require(script.UI.App)
 
 local SETTINGS_KEY = "StrataSettings"
+-- Wait briefly after a setting changes before writing, so slider drags batch into one write.
+local SAVE_DEBOUNCE = 0.3
 
 -- Restores persisted settings from the previous session. Tools always start off.
 local function restoreSettings()
@@ -52,6 +54,10 @@ local function restoreSettings()
 
 		if typeof(saved.showKeyHints) == "boolean" then
 			s.showKeyHints = saved.showKeyHints
+		end
+
+		if typeof(saved.showBrushDots) == "boolean" then
+			s.showBrushDots = saved.showBrushDots
 		end
 
 		if typeof(saved.radius) == "number" then
@@ -223,10 +229,8 @@ local function recentLooksToSave(looks: { Settings.RecentLook }): { { [string]: 
 	return result
 end
 
-local function saveSettings()
-	local s = Settings.get()
-
-	plugin:SetSetting(SETTINGS_KEY, {
+local function snapshotSettings(s: Settings.State): { [string]: unknown }
+	return {
 		radius = s.radius,
 		strength = s.strength,
 		power = s.power,
@@ -248,6 +252,7 @@ local function saveSettings()
 		autoBake = s.autoBake,
 		smoothingAngle = s.smoothingAngle,
 		showKeyHints = s.showKeyHints,
+		showBrushDots = s.showBrushDots,
 		paintMaterial = s.paintMaterial.Name,
 		paintColor = s.paintColor:ToHex(),
 		paintVariant = s.paintVariant,
@@ -262,10 +267,91 @@ local function saveSettings()
 		bakeFlatPart = s.bakeFlatPart,
 		bakeFlatNoShadow = s.bakeFlatNoShadow,
 		meshMode = s.meshMode,
-	})
+	}
+end
+
+local function valuesEqual(a: unknown, b: unknown): boolean
+	if a == b then
+		return true
+	end
+
+	if typeof(a) ~= "table" or typeof(b) ~= "table" then
+		return false
+	end
+
+	local tableA = a :: { [unknown]: unknown }
+	local tableB = b :: { [unknown]: unknown }
+
+	for k, v in tableA do
+		if not valuesEqual(v, tableB[k]) then
+			return false
+		end
+	end
+
+	for k in tableB do
+		if tableA[k] == nil then
+			return false
+		end
+	end
+
+	return true
 end
 
 restoreSettings()
+
+-- Track persisted changes and merge only modified keys into the saved table, so edits persist
+-- immediately (even if Studio restarts or reloads without unloading cleanly), an untouched tab
+-- or Play session never overwrites newer settings, and untouched fields pick up future defaults.
+local lastSnapshot: { [string]: unknown } = snapshotSettings(Settings.get())
+local dirtyKeys: { [string]: unknown } = {}
+local saveTimer: thread? = nil
+
+local function flushSettings()
+	if saveTimer then
+		task.cancel(saveTimer)
+		saveTimer = nil
+	end
+
+	if next(dirtyKeys) == nil then
+		return
+	end
+
+	local existing = plugin:GetSetting(SETTINGS_KEY)
+	local merged: { [string]: unknown } = if typeof(existing) == "table" then table.clone(existing :: { [string]: unknown }) else {}
+
+	for key, value in dirtyKeys do
+		merged[key] = value
+	end
+
+	plugin:SetSetting(SETTINGS_KEY, merged)
+	table.clear(dirtyKeys)
+end
+
+local stopSettingsSave = Settings.subscribe(function (s: Settings.State)
+	local current = snapshotSettings(s)
+	local changed = false
+
+	for key, value in current do
+		if not valuesEqual(value, lastSnapshot[key]) then
+			lastSnapshot[key] = value
+			dirtyKeys[key] = value
+			changed = true
+		end
+	end
+
+	if not changed then
+		return
+	end
+
+	if saveTimer then
+		task.cancel(saveTimer)
+	end
+
+	saveTimer = task.delay(SAVE_DEBOUNCE, function ()
+		saveTimer = nil
+		pcall(flushSettings)
+	end)
+end)
 
 local widget = plugin:CreateDockWidgetPluginGuiAsync(
 	"StrataPanel",
@@ -282,7 +368,7 @@ widget:GetPropertyChangedSignal("Enabled"):Connect(function ()
 		Settings.stopViewportTool()
 		Settings.setEditingPoints(false)
 		Settings.setOverlay("none")
-		saveSettings()
+		pcall(flushSettings)
 	end
 end)
 
@@ -312,7 +398,8 @@ widget:GetPropertyChangedSignal("Enabled"):Connect(renderPanel)
 renderPanel()
 
 plugin.Unloading:Connect(function ()
-	saveSettings()
+	stopSettingsSave()
+	pcall(flushSettings)
 	root:unmount()
 	stopBrushTool()
 	stopMaterialTool()

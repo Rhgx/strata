@@ -30,6 +30,7 @@ type ToggleKey =
 	| "stitchParts"
 	| "autoBake"
 	| "showKeyHints"
+	| "showBrushDots"
 	| "ribbonTools"
 	| "bakeSimplifyEdges"
 	| "bakeFlatPart"
@@ -40,7 +41,7 @@ type Tab = "edges" | "baking" | "interface"
 local TABS: { { id: Tab, label: string, tip: string } } = {
 	{ id = "edges", label = "Edges", tip = "**Edges and stitching**: sewing tile seams and snapping edges onto parts." },
 	{ id = "baking", label = "Baking", tip = "**Baking**: merging tiles into unions, shading and bake optimizations." },
-	{ id = "interface", label = "Interface", tip = "**Interface**: viewport key hints and ribbon buttons." },
+	{ id = "interface", label = "Interface", tip = "**Interface**: 3D view hints, brush dots and ribbon buttons." },
 }
 
 -- Combined height of the fixed top area (top padding, header row, gap, tab strip, bottom gap).
@@ -64,6 +65,8 @@ local function toggle(key: ToggleKey)
 				s.autoBake = not s.autoBake
 			elseif key == "showKeyHints" then
 				s.showKeyHints = not s.showKeyHints
+			elseif key == "showBrushDots" then
+				s.showBrushDots = not s.showBrushDots
 			elseif key == "bakeSimplifyEdges" then
 				s.bakeSimplifyEdges = not s.bakeSimplifyEdges
 			elseif key == "bakeFlatPart" then
@@ -317,10 +320,20 @@ local function interfaceTab(settings: Settings.State)
 			"**Show shortcut bar** in the 3D view.\n\n" .. "Displays active keys along the bottom of the viewport while a tool runs."
 		),
 
-		RibbonHeading = Rows.section(3, "Ribbon"),
+		BrushDots = Rows.checkbox(
+			3,
+			"Show brush dots",
+			settings.showBrushDots,
+			toggle("showBrushDots"),
+			"**Show point dots** inside the sculpt brush.\n\n"
+				.. "Marks which points `Raise`, `Lower`, `Smooth` and `Raise To` will move, and nearby points when the ring holds none.\n\n"
+				.. "> Off by default: the brush ring alone still dims when it holds no point."
+		),
+
+		RibbonHeading = Rows.section(4, "Ribbon"),
 
 		RibbonTools = Rows.checkbox(
-			4,
+			5,
 			"Tools on Plugins ribbon",
 			settings.ribbonTools,
 			toggle("ribbonTools"),

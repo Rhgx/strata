@@ -354,8 +354,8 @@ return function (plugin: Plugin): () -> ()
 	-- Shows the points inside the brush, stronger points more solid. A large brush holding more
 	-- than MAX_DOTS points shows none (the ring already says it all). An empty brush shows the
 	-- nearest points faintly, so a small brush between points shows where to aim.
-	local function showPreview(preview: Paint.Preview?, mode: Paint.Effect)
-		if not preview or preview.more then
+	local function showPreview(preview: Paint.Preview?, mode: Paint.Effect, show: boolean)
+		if not show or not preview or preview.more then
 			hideDots(1)
 			return
 		end
@@ -757,6 +757,10 @@ return function (plugin: Plugin): () -> ()
 
 	-- Viewport/Activation manages plugin:Activate and cursor icons across all tools.
 	local function onSettingsChanged(state: Settings.State)
+		if not state.showBrushDots then
+			hideDots(1)
+		end
+
 		if state.painting == wasPainting then
 			return
 		end
@@ -854,7 +858,7 @@ return function (plugin: Plugin): () -> ()
 					local current = Settings.get()
 					local preview = previewAt(resizeModels, held, mode, current)
 					placeCursor(held.position, displayNormal or held.normal, current, mode, isEmpty(preview))
-					showPreview(preview, mode)
+					showPreview(preview, mode, current.showBrushDots)
 					RadiusPreview.label(held.position, sizeText(current.radius))
 				end
 
@@ -871,7 +875,7 @@ return function (plugin: Plugin): () -> ()
 				if previewHit then
 					local preview = previewAt(models, previewHit, mode, settings)
 					placeCursor(previewHit.position, previewHit.normal, settings, mode, isEmpty(preview))
-					showPreview(preview, mode)
+					showPreview(preview, mode, settings.showBrushDots)
 					RadiusPreview.label(previewHit.position, sizeText(settings.radius))
 				else
 					local position, facing = RadiusPreview.fallback(settings.radius)
@@ -931,7 +935,7 @@ return function (plugin: Plugin): () -> ()
 			-- After this frame's paint, so the dots sit on the points where they are now.
 			local preview = previewAt(models, hit, mode, settings)
 			placeCursor(hit.position, displayNormal or hit.normal, settings, mode, isEmpty(preview))
-			showPreview(preview, mode)
+			showPreview(preview, mode, settings.showBrushDots)
 		end)
 	)
 
