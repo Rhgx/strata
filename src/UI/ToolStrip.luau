@@ -50,6 +50,82 @@ export type Props = {
 	active: Settings.Tool?,
 }
 
+local ICON_SIZE = 16
+
+--[[
+	One tool button, drawn by hand because StudioComponents buttons only take theme colors. Idle
+	brushes show their icon in the tool's color on the normal button; the running brush swaps
+	the two, filling the button with its color and drawing the icon in the normal button color,
+	so the running tool is told by color alone. Pick faces and Stitch have no color and use
+	Studio's own selected style.
+]]
+local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
+	local theme = StudioComponents.useTheme()
+	local hovered, setHovered = React.useState(false)
+	local pressed, setPressed = React.useState(false)
+	local accent = Accent.tool(props.tool, theme)
+	local icon = ICONS[props.tool]
+
+	local modifier = Enum.StudioStyleGuideModifier.Default
+	if props.selected then
+		modifier = Enum.StudioStyleGuideModifier.Selected
+	elseif pressed and hovered then
+		modifier = Enum.StudioStyleGuideModifier.Pressed
+	elseif hovered then
+		modifier = Enum.StudioStyleGuideModifier.Hover
+	end
+
+	local background, border, iconColor
+	if accent and props.selected then
+		-- A touch lighter on hover, like Studio's buttons.
+		background = if hovered then accent:Lerp(Color3.new(1, 1, 1), 0.12) else accent
+		border = background
+		iconColor = theme:GetColor(Enum.StudioStyleGuideColor.Button)
+	else
+		background = theme:GetColor(Enum.StudioStyleGuideColor.Button, modifier)
+		border = theme:GetColor(Enum.StudioStyleGuideColor.ButtonBorder, modifier)
+		iconColor = accent or theme:GetColor(Enum.StudioStyleGuideColor.ButtonText, modifier)
+	end
+
+	return e("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		AutoButtonColor = false,
+		Text = "",
+		BackgroundColor3 = background,
+		BorderColor3 = border,
+		[React.Event.InputBegan] = function(_, input: InputObject)
+			if input.UserInputType == Enum.UserInputType.MouseMovement then
+				setHovered(true)
+			elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+				setPressed(true)
+			end
+		end,
+		[React.Event.InputEnded] = function(_, input: InputObject)
+			if input.UserInputType == Enum.UserInputType.MouseMovement then
+				-- Leaving also ends a press, in case the release happens outside.
+				setHovered(false)
+				setPressed(false)
+			elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+				setPressed(false)
+			end
+		end,
+		[React.Event.Activated] = function()
+			Settings.toggleTool(props.tool)
+		end,
+	}, {
+		Icon = e("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(ICON_SIZE, ICON_SIZE),
+			BackgroundTransparency = 1,
+			Image = icon.Image,
+			ImageRectOffset = icon.RectOffset,
+			ImageRectSize = icon.RectSize,
+			ImageColor3 = iconColor,
+		}),
+	})
+end
+
 local function ToolStrip(props: Props)
 	local theme = StudioComponents.useTheme()
 	local children: { [string]: unknown } = {
@@ -69,27 +145,11 @@ local function ToolStrip(props: Props)
 	}
 	for index, tool: Settings.Tool in Settings.tools() do
 		local x = (index - 1) * (BUTTON + GAP) + (if index > BRUSHES then DIVIDER else 0)
-		local selected = props.active == tool
-		-- Brushes show their color; the running tool keeps the theme's text color on its
-		-- highlighted button.
-		local icon = ICONS[tool]
-		local accent = if selected then nil else Accent.tool(tool, theme)
-		if accent then
-			icon = table.clone(icon)
-			icon.Color = accent
-		end
 		children[tool] = e(Tooltip, {
 			Text = TIPS[tool],
 			Position = UDim2.fromOffset(x, 1),
 			Size = UDim2.fromOffset(BUTTON, BUTTON),
-		}, e(StudioComponents.Button, {
-			Size = UDim2.fromScale(1, 1),
-			Icon = icon,
-			Selected = selected,
-			OnActivated = function()
-				Settings.toggleTool(tool)
-			end,
-		}))
+		}, e(ToolButton, { tool = tool, selected = props.active == tool }))
 	end
 	return e("Frame", {
 		Size = UDim2.new(1, 0, 0, BUTTON + 4),

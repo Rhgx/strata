@@ -76,35 +76,17 @@ function Rows.section(layoutOrder: number, title: string, first: boolean?)
 	})
 end
 
-type TitleProps = {
-	LayoutOrder: number,
-	Text: string,
-	Accent: Color3?,
-	OnStop: () -> (),
-	StopTip: string,
-}
-
--- A tool page's heading: a short bar in the tool's color (the hue of its 3D cursor; dimmed for
--- tools without one), the tool's name in bold, and a small Stop button on the right, so stopping
--- costs no row of its own.
-local function Title(props: TitleProps)
-	local theme = StudioComponents.useTheme()
+-- A tool page's heading: the tool's name in bold and a small Stop button on the right, so
+-- stopping costs no row of its own. (The running tool's color shows on its tool strip button.)
+function Rows.title(layoutOrder: number, text: string, onStop: () -> (), stopTip: string)
 	return e("Frame", {
-		LayoutOrder = props.LayoutOrder,
+		LayoutOrder = layoutOrder,
 		Size = UDim2.new(1, 0, 0, ROW_HEIGHT),
 		BackgroundTransparency = 1,
 	}, {
-		Bar = e("Frame", {
-			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.fromScale(0, 0.5),
-			Size = UDim2.fromOffset(3, 14),
-			BorderSizePixel = 0,
-			BackgroundColor3 = props.Accent or theme:GetColor(Enum.StudioStyleGuideColor.DimmedText),
-		}),
 		Label = e(StudioComponents.Label, {
-			Position = UDim2.fromOffset(9, 0),
-			Size = UDim2.new(1, -(9 + ROW_HEIGHT + GAP), 1, 0),
-			Text = `<b>{props.Text}</b>`,
+			Size = UDim2.new(1, -(ROW_HEIGHT + GAP), 1, 0),
+			Text = `<b>{text}</b>`,
 			RichText = true,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -116,20 +98,17 @@ local function Title(props: TitleProps)
 			BackgroundTransparency = 1,
 		}, {
 			Tip = Rows.withTooltip(
-				props.StopTip,
+				stopTip,
 				e(StudioComponents.Button, {
 					Size = UDim2.fromScale(1, 1),
 					Icon = Icons.StopTool,
-					OnActivated = props.OnStop,
+					OnActivated = onStop,
 				})
 			),
 		}),
 	})
 end
 
-function Rows.title(layoutOrder: number, text: string, accent: Color3?, onStop: () -> (), stopTip: string)
-	return e(Title, { LayoutOrder = layoutOrder, Text = text, Accent = accent, OnStop = onStop, StopTip = stopTip })
-end
 
 -- The heading of a page opened over the panel (Settings, Help): a small back button and the
 -- page's name in bold, like a tool page's title.

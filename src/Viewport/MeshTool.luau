@@ -433,13 +433,23 @@ return function(plugin: Plugin): () -> ()
 	end
 
 	local endStroke: () -> ()
+	-- Set while Alt + dragging to resize; the cursor stays where the drag started.
+	local resize: Input.DragResize? = nil
 
 	local function beginStroke()
 		local settings = Settings.get()
+		-- A new press ends anything a missed button release left behind.
+		resize = nil
 		if recording then
 			endStroke()
 		end
 		if not settings.meshing or Session.isBaking() then
+			return
+		end
+		-- Alt + drag resizes instead (it would otherwise orbit the camera).
+		local drag = Input.beginDragResize(mouse, settings.radius)
+		if drag then
+			resize = drag
 			return
 		end
 		lastCenter = nil
@@ -461,6 +471,7 @@ return function(plugin: Plugin): () -> ()
 	end
 
 	function endStroke()
+		resize = nil
 		local current = press
 		press = nil
 		if current and not current.dragging and Settings.get().meshing then
@@ -578,9 +589,18 @@ return function(plugin: Plugin): () -> ()
 				drawResult()
 			end
 
+			local resizing = resize
+			if resizing then
+				local radius = Input.dragRadius(mouse, resizing)
+				if radius ~= settings.radius then
+					Settings.update(function(s)
+						s.radius = radius
+					end)
+				end
+			end
 			local models = workingModels()
-			local previewing = RadiusPreview.active()
-			local ray = if previewing then RadiusPreview.ray() else mouse.UnitRay
+			local previewing = RadiusPreview.active() or resizing ~= nil
+			local ray = if resizing then resizing.ray elseif RadiusPreview.active() then RadiusPreview.ray() else mouse.UnitRay
 			local hit = if ray then TileHit.findAlong(ray, models, holes) else nil
 			local sizeText = `Radius {formatStuds(settings.radius)} st`
 			if not hit then

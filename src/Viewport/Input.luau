@@ -104,6 +104,34 @@ local function restore()
 	restoring = false
 end
 
+-- Alt + drag resize speed: the radius doubles for about every 70 pixels dragged right.
+local RESIZE_RATE = 0.01
+
+-- An Alt + drag resize in progress (the brush tools resize like Hammer).
+export type DragResize = {
+	startX: number,
+	startRadius: number,
+	-- The mouse ray when the drag started, so the cursor stays where the drag began.
+	ray: Ray,
+}
+
+-- Starts an Alt + drag resize from the mouse, or nil when Alt is not held.
+function Input.beginDragResize(mouse: PluginMouse, radius: number): DragResize?
+	if not Input.alt() then
+		return nil
+	end
+	return { startX = mouse.X, startRadius = radius, ray = mouse.UnitRay }
+end
+
+-- The radius for the mouse's position in a drag (right grows, left shrinks), in half studs.
+-- Holds the camera still, since Alt + drag is also Studio's orbit. Call every frame of the drag.
+function Input.dragRadius(mouse: PluginMouse, drag: DragResize): number
+	Input.holdCamera()
+	-- Exponential so small and large brushes resize at a comfortable speed.
+	local radius = drag.startRadius * math.exp((mouse.X - drag.startX) * RESIZE_RATE)
+	return math.round(radius * 2) / 2
+end
+
 --[[
 	Calls `onStep(1)` or `onStep(-1)` on Ctrl + Scroll over the 3D view while `active()` says so,
 	and holds the camera still for it. Returns the connections.

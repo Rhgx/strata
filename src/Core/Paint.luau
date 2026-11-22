@@ -50,6 +50,9 @@ export type Brush = {
 	strength: number,
 	-- Studs along the axis for Raise To.
 	height: number,
+	-- Raise To measures `height` along the axis from the world origin (one height across every
+	-- tile, such as a road over stepped tiles) instead of from each tile's flat base.
+	raiseToWorld: boolean,
 }
 
 -- Smooth's neighborhood: at least this many grid steps, or this share of the brush radius.
@@ -325,7 +328,24 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 			local current = Displacement.fieldVector(disp, index)
 			local vector: Vector3
 			if brush.effect == "RaiseTo" then
-				local target = axis * brush.height - disp.offsets[index] - item.faceNormal * disp.elevation
+				local target: Vector3
+				if brush.raiseToWorld then
+					-- Height is measured along the world axis (the tile's face normal for the Face
+					-- and Curved axes, as Paint.heightAt picks it), and the point moves along its
+					-- own axis until it reaches it.
+					local unitAxis = if axis.Magnitude > 1e-6 then axis.Unit else item.faceNormal
+					local measure = item.pivot:VectorToWorldSpace(
+						if brush.axis == "Face" or brush.axis == "Subdiv" then item.faceNormal else unitAxis
+					)
+					local along = item.pivot:VectorToWorldSpace(unitAxis):Dot(measure)
+					if math.abs(along) < 0.15 then
+						-- Moving along this axis barely changes the height: leave the point.
+						continue
+					end
+					target = current + unitAxis * ((brush.height - p:Dot(measure)) / along)
+				else
+					target = axis * brush.height - disp.offsets[index] - item.faceNormal * disp.elevation
+				end
 				if brush.falloff == "Hard" then
 					-- Hammer's absolute mode: straight to the height.
 					vector = target
@@ -363,12 +383,19 @@ function Paint.apply(targets: { Opened }, centers: { Vector3 }, brush: Brush, dt
 	return changed
 end
 
--- The Raise To height (studs along the brush axis from the flat base face) of the surface at
--- `point` (world) on `opened`, for picking a height from the terrain.
+-- The Raise To height of the surface at `point` (world) on `opened`, for picking a height from
+-- the terrain: studs along the brush axis from the flat base face, or from the world origin with
+-- `raiseToWorld`.
 function Paint.heightAt(opened: Opened, point: Vector3, brush: Brush): number
 	local pivot = opened.model:GetPivot()
 	local disp = opened.disp
 	local normal = Displacement.faceNormal(disp)
+	if brush.raiseToWorld then
+		local world = if brush.axis == "Face" or brush.axis == "Subdiv"
+			then pivot:VectorToWorldSpace(normal)
+			else worldAxis(brush.axis, brush.pickedAxis) or Vector3.yAxis
+		return point:Dot(world.Unit)
+	end
 	local axis = if brush.axis == "Face" or brush.axis == "Subdiv"
 		then normal
 		else pivot:VectorToObjectSpace(worldAxis(brush.axis, brush.pickedAxis) or Vector3.yAxis)

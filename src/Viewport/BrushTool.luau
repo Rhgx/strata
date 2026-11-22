@@ -76,8 +76,7 @@ local MAX_STEPS = 16
 local SEAM_FRAMES = 2
 -- How quickly the ring's tilt follows the surface (higher is snappier).
 local NORMAL_FOLLOW = 24
--- Alt+drag resize speed: the radius doubles for about every 70 pixels dragged right.
-local RESIZE_RATE = 0.01
+
 local SEPARATOR = KeyStrip.SEPARATOR
 
 local MODE_COLORS: { [Paint.Effect]: Color3 } = {
@@ -180,7 +179,7 @@ return function(plugin: Plugin): () -> ()
 	local missFrames = 0
 	local displayNormal: Vector3? = nil
 	-- Set while Alt+dragging to resize; the ring stays where the drag started.
-	local resize: { startX: number, startRadius: number }? = nil
+	local resize: Input.DragResize? = nil
 	local wasPainting = false
 
 	-- The ring is depth tested (true 3D occlusion); the faint ghost copy draws on top so the
@@ -258,6 +257,7 @@ return function(plugin: Plugin): () -> ()
 			radius = settings.radius,
 			strength = settings.strength,
 			height = settings.height,
+			raiseToWorld = settings.raiseToWorld,
 		}
 	end
 
@@ -425,12 +425,15 @@ return function(plugin: Plugin): () -> ()
 		if recording then
 			endStroke()
 		end
-		if resize or not settings.painting or Session.isBaking() then
+		-- A new press ends a resize whose button release was missed.
+		resize = nil
+		if not settings.painting or Session.isBaking() then
 			return
 		end
 		-- Alt+drag resizes the brush instead of painting.
-		if Input.alt() then
-			resize = { startX = mouse.X, startRadius = settings.radius }
+		local drag = Input.beginDragResize(mouse, settings.radius)
+		if drag then
+			resize = drag
 			return
 		end
 		if
@@ -584,11 +587,7 @@ return function(plugin: Plugin): () -> ()
 
 			local resizing = resize
 			if resizing then
-				-- Alt + drag is also Studio's camera orbit; keep the camera still while resizing.
-				Input.holdCamera()
-				-- Exponential so small and large brushes resize at a comfortable speed.
-				local radius = resizing.startRadius * math.exp((mouse.X - resizing.startX) * RESIZE_RATE)
-				radius = math.round(radius * 2) / 2
+				local radius = Input.dragRadius(mouse, resizing)
 				if radius ~= settings.radius then
 					Settings.update(function(s)
 						s.radius = radius

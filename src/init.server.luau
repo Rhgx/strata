@@ -66,6 +66,9 @@ local function restoreSettings()
 		if typeof(saved.height) == "number" then
 			s.height = saved.height
 		end
+		if typeof(saved.raiseToWorld) == "boolean" then
+			s.raiseToWorld = saved.raiseToWorld
+		end
 		-- Plugin settings are JSON, so the picked axis is stored as { x, y, z }.
 		local picked = saved.pickedAxis
 		if typeof(picked) == "table" then
@@ -111,6 +114,21 @@ local function restoreSettings()
 		if typeof(saved.paintFine) == "boolean" then
 			s.paintFine = saved.paintFine
 		end
+		-- Stored as { m = material name, c = hex color, v = variant }; bad entries are skipped.
+		if typeof(saved.recentLooks) == "table" then
+			local looks: { Settings.RecentLook } = {}
+			for _, entry in saved.recentLooks do
+				if typeof(entry) ~= "table" or typeof(entry.m) ~= "string" or typeof(entry.c) ~= "string" then
+					continue
+				end
+				local lookMaterial = Enum.Material:FromName(entry.m)
+				local ok, color = pcall(Color3.fromHex, entry.c)
+				if lookMaterial and ok and #looks < Settings.RECENT_LOOKS then
+					table.insert(looks, { material = lookMaterial, color = color, variant = if typeof(entry.v) == "string" then entry.v else "" })
+				end
+			end
+			s.recentLooks = looks
+		end
 		if typeof(saved.bakeSimplifyAngle) == "number" then
 			s.bakeSimplifyAngle = saved.bakeSimplifyAngle
 		end
@@ -138,6 +156,14 @@ local function restoreSettings()
 	end)
 end
 
+local function recentLooksToSave(looks: { Settings.RecentLook }): { { [string]: string } }
+	local result = {}
+	for _, look in looks do
+		table.insert(result, { m = look.material.Name, c = look.color:ToHex(), v = look.variant })
+	end
+	return result
+end
+
 local function saveSettings()
 	local s = Settings.get()
 	plugin:SetSetting(SETTINGS_KEY, {
@@ -146,6 +172,7 @@ local function saveSettings()
 		power = s.power,
 		mode = s.mode,
 		height = s.height,
+		raiseToWorld = s.raiseToWorld,
 		falloff = s.falloff,
 		axis = s.axis,
 		pickedAxis = { s.pickedAxis.X, s.pickedAxis.Y, s.pickedAxis.Z },
@@ -164,6 +191,7 @@ local function saveSettings()
 		paintColor = s.paintColor:ToHex(),
 		paintVariant = s.paintVariant,
 		paintFine = s.paintFine,
+		recentLooks = recentLooksToSave(s.recentLooks),
 		ribbonTools = s.ribbonTools,
 		simplifyAngle = s.simplifyAngle,
 		bakeSimplifyAngle = s.bakeSimplifyAngle,

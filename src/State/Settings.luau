@@ -20,6 +20,13 @@ export type MeshMode = "Simplify" | "Holes"
 -- A page shown over the panel instead of the current context.
 export type Overlay = "none" | "settings" | "help"
 
+-- A look the Material tool painted or picked recently.
+export type RecentLook = {
+	material: Enum.Material,
+	color: Color3,
+	variant: string,
+}
+
 export type State = {
 	-- The viewport tools share the mouse, so at most one of painting, coloring, meshing,
 	-- picking and stitching is on.
@@ -32,6 +39,8 @@ export type State = {
 	paintMaterial: Enum.Material,
 	paintColor: Color3,
 	paintVariant: string,
+	-- Looks painted or picked lately, newest first (up to RECENT_LOOKS), for one-click switching.
+	recentLooks: { RecentLook },
 	-- Material tool: paint single triangles instead of whole grid cells.
 	paintFine: boolean,
 	-- The Mesh tool: removes points or cuts holes.
@@ -56,6 +65,8 @@ export type State = {
 	strength: number,
 	-- Raise To: studs along the axis from the flat base face.
 	height: number,
+	-- Raise To: `height` is a world height along the axis instead of one above each tile's base.
+	raiseToWorld: boolean,
 	falloff: Falloff,
 	axis: Axis,
 	-- World-space axis for "Picked", set with Alt + Right Click.
@@ -106,8 +117,9 @@ Settings.TILE_SIZE_MIN = 4
 Settings.TILE_SIZE_MAX = 512
 Settings.SMOOTHING_MIN = 0
 Settings.SMOOTHING_MAX = 180
-Settings.HEIGHT_MIN = -256
-Settings.HEIGHT_MAX = 256
+-- Wide enough for world heights (Raise To from World).
+Settings.HEIGHT_MIN = -10000
+Settings.HEIGHT_MAX = 10000
 Settings.NOISE_MIN = -64
 Settings.NOISE_MAX = 64
 Settings.STITCH_REACH_MIN = 0.5
@@ -181,6 +193,7 @@ local state: State = table.freeze({
 	paintMaterial = Enum.Material.Asphalt,
 	paintColor = Color3.fromRGB(90, 90, 95),
 	paintVariant = "",
+	recentLooks = {},
 	paintFine = false,
 	meshing = false,
 	meshMode = "Simplify" :: MeshMode,
@@ -196,6 +209,7 @@ local state: State = table.freeze({
 	radius = 8,
 	strength = 6,
 	height = 0,
+	raiseToWorld = false,
 	falloff = "Soft" :: Falloff,
 	axis = "Face" :: Axis,
 	pickedAxis = Vector3.yAxis,
@@ -229,6 +243,27 @@ function Settings.get(): State
 end
 
 -- Applies `change` to a copy of the current state and notifies listeners.
+Settings.RECENT_LOOKS = 6
+
+-- Whether `look` is the paint look in `s`. Colors compare by their 8-bit hex, as saved, so a look
+-- restored from saved settings still matches.
+function Settings.isPaintLook(s: State, look: RecentLook): boolean
+	return look.material == s.paintMaterial and look.variant == s.paintVariant and look.color:ToHex() == s.paintColor:ToHex()
+end
+
+-- Puts the current paint look first in the recent looks (moving it up if it is there already).
+function Settings.rememberPaintLook()
+	Settings.update(function(s)
+		local list: { RecentLook } = { { material = s.paintMaterial, color = s.paintColor, variant = s.paintVariant } }
+		for _, look in s.recentLooks do
+			if not Settings.isPaintLook(s, look) and #list < Settings.RECENT_LOOKS then
+				table.insert(list, look)
+			end
+		end
+		s.recentLooks = list
+	end)
+end
+
 function Settings.update(change: (State) -> ())
 	local nextState = table.clone(state)
 	change(nextState)

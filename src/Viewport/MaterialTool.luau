@@ -90,6 +90,8 @@ return function(plugin: Plugin): () -> ()
 	local warned: { [Opened]: true } = {}
 	local lastCenter: Vector3? = nil
 	local wasColoring = false
+	-- Whether this stroke painted the paint look (not only erased), so it joins the recent looks.
+	local paintedLook = false
 
 	-- The cursor is the outline of the triangles a click would paint. The ring only shows the
 	-- size during a radius preview with no terrain in the middle of the view.
@@ -174,6 +176,9 @@ return function(plugin: Plugin): () -> ()
 			end)
 			if #changed > 0 then
 				touched[opened] = true
+				if not erase then
+					paintedLook = true
+				end
 				local count = Displacement.lookCount(disp)
 				if count > LOOK_WARNING and not warned[opened] then
 					warned[opened] = true
@@ -217,6 +222,7 @@ return function(plugin: Plugin): () -> ()
 			end
 		end)
 		if part then
+			Settings.rememberPaintLook()
 			Status.post(
 				"success",
 				`Picked {describe({ material = part.Material, color = part.Color, variant = part.MaterialVariant })} from {part.Name}.`
@@ -227,9 +233,13 @@ return function(plugin: Plugin): () -> ()
 	end
 
 	local endStroke: () -> ()
+	-- Set while Alt + dragging to resize; the outline stays where the drag started.
+	local resize: Input.DragResize? = nil
 
 	local function beginStroke()
 		local settings = Settings.get()
+		-- A new press ends anything a missed button release left behind.
+		resize = nil
 		if recording then
 			endStroke()
 		end
@@ -238,6 +248,12 @@ return function(plugin: Plugin): () -> ()
 		end
 		if settings.pickingLook then
 			pickLook()
+			return
+		end
+		-- Alt + drag resizes instead of painting (it would otherwise orbit the camera).
+		local drag = Input.beginDragResize(mouse, settings.radius)
+		if drag then
+			resize = drag
 			return
 		end
 		recording = ChangeHistoryService:TryBeginRecording("Strata paint material")
@@ -254,6 +270,7 @@ return function(plugin: Plugin): () -> ()
 	end
 
 	function endStroke()
+		resize = nil
 		local current = recording
 		if not current then
 			return
@@ -271,6 +288,10 @@ return function(plugin: Plugin): () -> ()
 			current,
 			if edited > 0 then Enum.FinishRecordingOperation.Commit else Enum.FinishRecordingOperation.Cancel
 		)
+		if paintedLook then
+			Settings.rememberPaintLook()
+		end
+		paintedLook = false
 	end
 
 	local function onSettingsChanged(state: Settings.State)
@@ -348,9 +369,18 @@ return function(plugin: Plugin): () -> ()
 				hideCursor()
 				return
 			end
+			local resizing = resize
+			if resizing then
+				local radius = Input.dragRadius(mouse, resizing)
+				if radius ~= settings.radius then
+					Settings.update(function(s)
+						s.radius = radius
+					end)
+				end
+			end
 			local models = workingModels()
 			local previewing = RadiusPreview.active()
-			local ray = if previewing then RadiusPreview.ray() else mouse.UnitRay
+			local ray = if resizing then resizing.ray elseif previewing then RadiusPreview.ray() else mouse.UnitRay
 			local hit = if ray then TileHit.findAlong(ray, models) else nil
 			if not hit then
 				hideCursor()
@@ -371,7 +401,7 @@ return function(plugin: Plugin): () -> ()
 			end
 			ring.Visible = false
 			drawOutline(models, hit, settings, erase)
-			RadiusPreview.label(if previewing then hit.position else nil, `Radius {formatStuds(settings.radius)} st`)
+			RadiusPreview.label(if previewing or resizing then hit.position else nil, `Radius {formatStuds(settings.radius)} st`)
 
 			if recording then
 				paintAt(models, hit)

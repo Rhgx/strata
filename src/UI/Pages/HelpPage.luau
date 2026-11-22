@@ -34,6 +34,7 @@ local QUICK_START = table.concat({
 local COMMON_KEYS: { KeyHint } = {
 	{ key = "Ctrl + Scroll", action = "Resize or Reach" },
 	{ key = "[ and ]", action = "Resize or Reach" },
+	{ key = "Alt + Drag", action = "Resize brush" },
 	{ key = "Esc", action = "Stop tool" },
 	{ key = "Ctrl + Z", action = "Undo a step" },
 }
@@ -43,7 +44,6 @@ local PAINT_KEYS: { KeyHint } = {
 	{ key = "Ctrl", action = "Invert brush" },
 	{ key = "Shift", action = "Smooth" },
 	{ key = "Ctrl + Click", action = "Pick height" },
-	{ key = "Alt + Drag", action = "Resize brush" },
 	{ key = "Alt + Right Click", action = "Pick axis" },
 }
 

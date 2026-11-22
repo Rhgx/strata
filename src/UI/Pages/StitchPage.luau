@@ -17,7 +17,6 @@ local function StitchPage(props: { settings: Settings.State })
 		Title = Rows.title(
 			1,
 			"Stitch to part",
-			nil,
 			Settings.stopViewportTool,
 			"**Stop stitching** (`Esc`).\n\nBakes stitched tiles if `Bake automatically` is on."
 		),

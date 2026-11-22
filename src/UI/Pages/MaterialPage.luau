@@ -11,8 +11,9 @@ local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local Appearance = require(script.Parent.Parent.Parent.Actions.Appearance)
 local ColorField = require(script.Parent.Parent.ColorField)
 local Dropdown = require(script.Parent.Parent.Dropdown)
-local Accent = require(script.Parent.Parent.Accent)
+
 local Rows = require(script.Parent.Parent.Rows)
+local Tooltip = require(script.Parent.Parent.Tooltip)
 
 local e = React.createElement
 
@@ -57,15 +58,69 @@ local function variantRow(settings: Settings.State)
 	)
 end
 
+local SWATCH = 20
+local SWATCH_GAP = 3
+
+-- One recent look: a swatch of its color, outlined when it is the look being painted.
+local function RecentSwatch(props: { look: Settings.RecentLook, current: boolean, order: number })
+	local theme = StudioComponents.useTheme()
+	local look = props.look
+	local variant = if look.variant ~= "" then ` ({look.variant})` else ""
+	return e(Tooltip, {
+		Text = `**{Appearance.label(look.material)}{variant}**, #{look.color:ToHex():upper()}\n\n> Click to paint with this look.`,
+		LayoutOrder = props.order,
+		Size = UDim2.fromOffset(SWATCH, SWATCH),
+	}, e("TextButton", {
+		Size = UDim2.fromScale(1, 1),
+		AutoButtonColor = false,
+		Text = "",
+		BackgroundColor3 = look.color,
+		BorderColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
+		[React.Event.Activated] = function()
+			Settings.update(function(s)
+				s.paintMaterial = look.material
+				s.paintColor = look.color
+				s.paintVariant = look.variant
+			end)
+		end,
+	}, {
+		Current = if props.current
+			then e("UIStroke", {
+				Thickness = 2,
+				Color = theme:GetColor(Enum.StudioStyleGuideColor.MainText),
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			})
+			else nil,
+	}))
+end
+
+-- The looks painted or picked lately, one click each, for switching between road, dirt and rock.
+local function recentRow(layoutOrder: number, settings: Settings.State)
+	if #settings.recentLooks == 0 then
+		return nil
+	end
+	local swatches: { [string]: unknown } = {
+		Layout = e("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, SWATCH_GAP),
+		}),
+	}
+	for i, look in settings.recentLooks do
+		local current = Settings.isPaintLook(settings, look)
+		swatches[`Look{i}`] = e(RecentSwatch, { look = look, current = current, order = i })
+	end
+	return Rows.property(layoutOrder, "Recent", e("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, swatches))
+end
+
 local function MaterialPage(props: { settings: Settings.State })
 	local settings = props.settings
-	local theme = StudioComponents.useTheme()
 
 	local children: { [string]: unknown } = {
 		Title = Rows.title(
 			1,
 			"Material",
-			Accent.tool("Material", theme),
 			Settings.stopViewportTool,
 			"**Stop the Material tool** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
 		),
@@ -114,8 +169,9 @@ local function MaterialPage(props: { settings: Settings.State })
 				end)
 			end,
 		}),
+		Recent = recentRow(8, settings),
 		Radius = Rows.property(
-			8,
+			9,
 			"Radius",
 			e(StudioComponents.NumericInput, {
 				Value = settings.radius,
@@ -135,7 +191,7 @@ local function MaterialPage(props: { settings: Settings.State })
 				.. "> Resize in 3D: `Ctrl + Scroll` or `[` and `]`."
 		),
 		Fine = Rows.checkbox(
-			9,
+			10,
 			"Fine (triangles)",
 			settings.paintFine,
 			function()
@@ -148,7 +204,7 @@ local function MaterialPage(props: { settings: Settings.State })
 				.. "> Edges follow the tile grid; raise `Detail` for smoother borders."
 		),
 		SelectedOnly = Rows.checkbox(
-			10,
+			11,
 			"Selected only",
 			settings.paintSelectedOnly,
 			function()

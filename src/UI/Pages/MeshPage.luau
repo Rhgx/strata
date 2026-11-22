@@ -13,7 +13,7 @@ local Query = require(script.Parent.Parent.Parent.Scene.Query)
 local MeshStage = require(script.Parent.Parent.Parent.Scene.MeshStage)
 local MeshActions = require(script.Parent.Parent.Parent.Actions.Mesh)
 local Format = require(script.Parent.Parent.Format)
-local Accent = require(script.Parent.Parent.Accent)
+
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 
@@ -69,7 +69,6 @@ end
 
 local function MeshPage(props: { settings: Settings.State })
 	local settings = props.settings
-	local theme = StudioComponents.useTheme()
 	local holes = settings.meshMode == "Holes"
 	local selected = #Query.selectedModels()
 	local hasTiles = #Session.models() > 0
@@ -93,11 +92,9 @@ local function MeshPage(props: { settings: Settings.State })
 	end, {})
 
 	local children: { [string]: unknown } = {
-		-- Cutting holes shows in red in 3D, like the Lower brush.
 		Title = Rows.title(
 			1,
 			"Mesh",
-			Accent.tool(if holes then "Lower" else "Mesh", theme),
 			Settings.stopViewportTool,
 			"**Stop the Mesh tool** (`Esc`).\n\n"
 				.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on."

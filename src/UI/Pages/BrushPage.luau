@@ -8,7 +8,7 @@ local Settings = require(script.Parent.Parent.Parent.State.Settings)
 local RadiusPreview = require(script.Parent.Parent.Parent.Viewport.RadiusPreview)
 local Session = require(script.Parent.Parent.Parent.Scene.Session)
 local Query = require(script.Parent.Parent.Parent.Scene.Query)
-local Accent = require(script.Parent.Parent.Accent)
+
 local Icons = require(script.Parent.Parent.Icons)
 local Rows = require(script.Parent.Parent.Rows)
 local Dropdown = require(script.Parent.Parent.Dropdown)
@@ -29,6 +29,12 @@ local AXIS_ICONS: { [Settings.Axis]: Icons.Icon } = {
 	Subdiv = Icons.AxisCurved,
 }
 
+-- Raise To's reference: each tile's flat base, or the world origin.
+local FROM_ITEMS = {
+	{ Id = "Tile", Text = "Tile base" },
+	{ Id = "World", Text = "World" },
+}
+
 local AXIS_ITEMS = {}
 for _, axis: Settings.Axis in Settings.axes() do
 	table.insert(AXIS_ITEMS, { Id = axis, Text = Settings.axisLabel(axis), Icon = AXIS_ICONS[axis] })
@@ -45,24 +51,15 @@ local function slider(value: number, min: number, max: number, onChanged: (numbe
 	})
 end
 
--- The tool each brush mode belongs to, for its color.
-local TOOL_OF: { [Settings.BrushMode]: Settings.Tool } = {
-	Raise = "Raise",
-	Lower = "Lower",
-	Smooth = "Smooth",
-	RaiseTo = "RaiseTo",
-}
 
 local function BrushPage(props: { settings: Settings.State })
 	local settings = props.settings
 	local mode: Settings.BrushMode = settings.mode
-	local theme = StudioComponents.useTheme()
 
 	local children: { [string]: unknown } = {
 		Title = Rows.title(
 			1,
 			Settings.modeLabel(mode),
-			Accent.tool(TOOL_OF[mode], theme),
 			Settings.stopViewportTool,
 			"**Stop painting** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
 		),
@@ -79,9 +76,9 @@ local function BrushPage(props: { settings: Settings.State })
 				.. "The brush always reaches at least one grid step (set by `Detail`). Below that, a smaller radius pushes more gently.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
-		DirectionHeading = Rows.section(8, "Direction"),
+		DirectionHeading = Rows.section(9, "Direction"),
 		Axis = Rows.property(
-			9,
+			10,
 			"Axis",
 			e(Dropdown, {
 				Items = AXIS_ITEMS,
@@ -105,7 +102,7 @@ local function BrushPage(props: { settings: Settings.State })
 		),
 		-- Which tiles the brush affects, so it sits with the brush settings, not under Direction.
 		SelectedOnly = Rows.checkbox(
-			7,
+			8,
 			"Selected only",
 			settings.paintSelectedOnly,
 			function()
@@ -122,8 +119,27 @@ local function BrushPage(props: { settings: Settings.State })
 	-- mode), so it has no Strength; with Soft falloff it eases there at Strength speed.
 	local raiseTo = mode == "RaiseTo"
 	if raiseTo then
-		children.Height = Rows.property(
+		children.From = Rows.property(
 			4,
+			"From",
+			e(Dropdown, {
+				Items = FROM_ITEMS,
+				RowHeight = 20,
+				SelectedItem = if settings.raiseToWorld then "World" else "Tile",
+				OnItemSelected = function(id: string?)
+					if id == "World" or id == "Tile" then
+						Settings.update(function(s)
+							s.raiseToWorld = id == "World"
+						end)
+					end
+				end,
+			}),
+			"**Where Height is measured from.**\n\n"
+				.. "- **Tile base**: each tile's own flat face (0 flattens hills back).\n"
+				.. "- **World**: the world origin, so one Height lines up across tiles at different levels, such as a road over stepped ground. Use with the `Up (Y)` axis for a world Y height."
+		)
+		children.Height = Rows.property(
+			5,
 			"Height",
 			e(StudioComponents.NumericInput, {
 				Value = settings.height,
@@ -137,14 +153,14 @@ local function BrushPage(props: { settings: Settings.State })
 					end)
 				end,
 			}),
-			"**Target offset** in studs along the axis.\n\n"
-				.. "Measured from each tile's original flat face. Negative values carve inward.\n\n"
-				.. "> `Ctrl + Click` terrain in 3D to pick its height. 0 resets hills to flat."
+			"**Target height** in studs along the axis.\n\n"
+				.. "From each tile's flat face, or from the world origin with `From: World`. Negative values carve inward.\n\n"
+				.. "> `Ctrl + Click` terrain in 3D to pick its height. From `Tile base`, 0 resets hills to flat."
 		)
 	end
 	if not raiseTo or settings.falloff == "Soft" then
 		children.Strength = Rows.property(
-			5,
+			6,
 			"Strength",
 			slider(settings.strength, Settings.STRENGTH_MIN, Settings.STRENGTH_MAX, function(value: number)
 				Settings.update(function(s)
@@ -160,7 +176,7 @@ local function BrushPage(props: { settings: Settings.State })
 	-- Falloff changes Raise, Lower and Raise To.
 	if mode ~= "Smooth" then
 		children.Falloff = Rows.property(
-			6,
+			7,
 			"Falloff",
 			e(Dropdown, {
 				Items = FALLOFF_ITEMS,
@@ -182,7 +198,7 @@ local function BrushPage(props: { settings: Settings.State })
 	if settings.axis == "Picked" then
 		local v = settings.pickedAxis
 		children.Picked = Rows.value(
-			10,
+			11,
 			"Picked",
 			string.format("%.2f, %.2f, %.2f", v.X, v.Y, v.Z),
 			nil,

@@ -50,6 +50,7 @@ Strata matches Hammer's power transitions (stepping one power at a time, averagi
 - **Cursor centering**: the brush centers on the exact surface point under the cursor using snapshotted triangles (`src/Core/SurfaceRay.luau`) rather than snapping to the nearest grid vertex.
 - **Grid-minimum reach and axial weighting**: a brush smaller than the grid always reaches at least `1.0` grid step (`Soft`/`Smooth`) or `0.75` grid steps (`Hard`) so it never sits idly between vertices. Vertex distance along the tile's face normal is weighted down (`AXIAL_SHARE = 0.75`) so vertices rising under a held brush stay inside it.
 - **Soft `Raise To`**: `Hard` falloff matches Hammer's immediate absolute placement (dropping offset and elevation), while `Soft` falloff eases exponentially toward the target height feathered at the rim.
+- **`Raise To` from World**: beyond Hammer, `From: World` measures `Height` along the axis from the world origin instead of each tile's flat face (`Settings.raiseToWorld`), so one height lines up across tiles at different levels (a road over stepped ground). `Ctrl + Click` then picks the world height under the cursor.
 
 ### 4. Smooth neighborhood (`src/Core/Paint.luau`)
 

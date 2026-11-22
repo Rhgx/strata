@@ -144,7 +144,6 @@ local function CreatePage(props: Props)
 		children.Title = Rows.title(
 			1,
 			"Pick faces",
-			nil,
 			Settings.stopViewportTool,
 			"**Stop picking** (`Esc`).\n\nClears any picked faces."
 		)
