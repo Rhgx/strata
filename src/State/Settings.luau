@@ -119,6 +119,8 @@ export type State = {
 	showKeyHints: boolean,
 	-- Display point dots inside the sculpt brush cursor (Raise, Lower, Smooth, Raise To).
 	showBrushDots: boolean,
+	-- Display hover tooltips on panel controls (status bar messages always show full text on hover).
+	showTooltips: boolean,
 	-- Mirror tool buttons on Studio's Plugins ribbon tab (they always appear in the panel strip).
 	ribbonTools: boolean,
 }
@@ -259,6 +261,7 @@ local state: State = table.freeze({
 	showKeyHints = true,
 	-- Off by default for a cleaner 3D view; the brush ring still dims when empty.
 	showBrushDots = false,
+	showTooltips = true,
 	ribbonTools = false,
 })
 
@@ -389,10 +392,16 @@ function Settings.setEditingPoints(on: boolean)
 end
 
 -- Starts `tool`, or stops it when already active (matching Studio's terrain editor).
--- Starting a tool closes Settings or Help so the tool's options are visible.
+-- Clicking the active tool while Settings or Help is open returns to that tool's page.
+-- Starting another tool closes Settings or Help so the tool's options are visible.
 function Settings.toggleTool(tool: Tool)
 	Settings.update(function (s)
 		if Settings.activeTool(s) == tool then
+			if s.overlay ~= "none" then
+				s.overlay = "none"
+				return
+			end
+
 			s.painting = false
 			s.coloring = false
 			s.meshing = false

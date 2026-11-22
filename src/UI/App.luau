@@ -24,6 +24,7 @@ local Settings = require(State.Settings)
 
 local Query = require(Plugin.Scene.Query)
 
+local Rows = require(UI.Rows)
 local StatusBar = require(UI.StatusBar)
 local ToolStrip = require(UI.ToolStrip)
 local useRefresh = require(UI.useRefresh)
@@ -42,8 +43,7 @@ local SettingsPage = require(Pages.SettingsPage)
 
 local e = React.createElement
 
-local STATUS_HEIGHT = 24
-local STRIP_HEIGHT = 30
+local STATUS_HEIGHT = 26
 
 type Page = "settings" | "help" | "brush" | "material" | "mesh" | "pick" | "stitch" | "points" | "tiles" | "parts" | "overview"
 
@@ -90,10 +90,16 @@ local function idleText(settings: Settings.State, ctx: Context): string
 	local page = ctx.page
 	local hasTiles = ctx.place.total > 0
 
-	if page == "settings" then
-		return "Saved between sessions."
-	elseif page == "help" then
-		return "Esc returns to the panel."
+	if page == "settings" or page == "help" then
+		local active = Settings.activeTool(settings)
+
+		if active then
+			return `Esc returns to {Settings.toolLabel(active)}.`
+		elseif settings.editingPoints then
+			return "Esc returns to Edit points."
+		end
+
+		return if page == "settings" then "Saved between sessions." else "Esc returns to the panel."
 	elseif page == "brush" then
 		if not hasTiles then
 			return "No terrain yet."
@@ -149,7 +155,7 @@ local function body(settings: Settings.State, ctx: Context)
 	if page == "settings" then
 		return e(SettingsPage, { settings = settings })
 	elseif page == "help" then
-		return e(HelpPage)
+		return e(HelpPage, { settings = settings })
 	elseif page == "brush" then
 		return e(BrushPage, { settings = settings })
 	elseif page == "material" then
@@ -175,7 +181,6 @@ local function App()
 	local settings = useSettings()
 	local refreshVersion = useRefresh()
 	local active = Settings.activeTool(settings)
-	local overlayOpen = settings.overlay ~= "none"
 
 	-- Memoize scene scans so brush slider ticks and Alt + Drag resizes do not re-scan every tile.
 	local scene = React.useMemo(function ()
@@ -195,14 +200,17 @@ local function App()
 		end
 	end, { active })
 
-	local stripHeight = if overlayOpen then 0 else STRIP_HEIGHT
+	local showStrip = settings.overlay == "none"
+	local topOffset = if showStrip then Rows.BAR_HEIGHT else 0
 
 	return e(StudioComponents.Background, {}, {
-		Strip = if overlayOpen then nil else e(ToolStrip, { active = active }),
+		-- Overlays (Settings, Help) replace Band 1 with a slot-aligned Back + title bar at the
+		-- exact same 30 px height and hairline, so switching between views never shifts geometry.
+		Strip = if showStrip then e(ToolStrip, { active = active, hasTiles = ctx.place.total > 0 }) else nil,
 
 		Main = e("Frame", {
-			Position = UDim2.fromOffset(0, stripHeight),
-			Size = UDim2.new(1, 0, 1, -(STATUS_HEIGHT + stripHeight)),
+			Position = UDim2.fromOffset(0, topOffset),
+			Size = UDim2.new(1, 0, 1, -(STATUS_HEIGHT + topOffset)),
 			BackgroundTransparency = 1,
 			ClipsDescendants = true,
 		}, {

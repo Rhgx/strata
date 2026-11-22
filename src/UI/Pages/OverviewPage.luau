@@ -42,7 +42,6 @@ local function bakeAllButton(layoutOrder: number, info: Query.PlaceInfo)
 			Bake.report(ok, result, "Baked")
 		end,
 		"**Bake every unbaked tile** in this place.\n\n"
-			.. "Merges each tile into a single union.\n\n"
 			.. "> Run before publishing if `Bake automatically` is off.",
 		nil,
 		Icons.BakeTiles,
@@ -92,7 +91,7 @@ local function OverviewPage()
 		),
 
 		Heading = Rows.section(2, "Place"),
-		Tiles = Rows.value(3, "Tiles", Format.plural(info.total, "tile"), nil, "**Total terrain tiles** in this place."),
+		Tiles = Rows.value(3, "Tiles", Format.plural(info.total, "tile")),
 
 		Baked = Rows.value(
 			4,
@@ -107,28 +106,25 @@ local function OverviewPage()
 		ActionsHeading = Rows.section(5, "Actions"),
 
 		Actions = Rows.grid(6, 2, {
-			SelectAll = Rows.withTooltip(
-				"**Select every tile** in this place, to edit them together on the tile page.",
-				e(StudioComponents.Button, {
-					Size = UDim2.fromScale(1, 1),
-					Text = "Select all",
-					Icon = Icons.Select,
+			SelectAll = e(StudioComponents.Button, {
+				LayoutOrder = 1,
+				Size = UDim2.fromScale(1, 1),
+				Text = "Select all",
+				Icon = Icons.Select,
 
-					OnActivated = function ()
-						local models: { Instance } = {}
+				OnActivated = function ()
+					local models: { Instance } = {}
 
-						for _, model in Session.models() do
-							table.insert(models, model)
-						end
+					for _, model in Session.models() do
+						table.insert(models, model)
+					end
 
-						Selection:Set(models)
-					end,
-				}),
-				1
-			),
+					Selection:Set(models)
+				end,
+			}),
 
 			Pick = Rows.withTooltip(
-				"**Pick part faces** in the 3D view to turn into more terrain.",
+				"**Pick part faces** in 3D, then click `Create`.",
 				e(StudioComponents.Button, {
 					Size = UDim2.fromScale(1, 1),
 					Text = "Pick faces",

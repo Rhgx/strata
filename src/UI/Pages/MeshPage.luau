@@ -33,49 +33,24 @@ local Icons = require(UI.Icons)
 
 local e = React.createElement
 
--- Two-button Simplify / Cut holes mode toggle so the active mode is always visible.
-local function modeRow(layoutOrder: number, settings: Settings.State)
-	local function button(order: number, text: string, icon: Icons.Icon, mode: Settings.MeshMode, tooltip: string)
-		return Rows.withTooltip(
-			tooltip,
-			e(StudioComponents.Button, {
-				Size = UDim2.fromScale(1, 1),
-				Text = text,
-				Icon = icon,
-				Selected = settings.meshMode == mode,
-
-				OnActivated = function ()
-					Settings.update(function (s)
-						s.meshMode = mode
-					end)
-				end,
-			}),
-			order
-		)
-	end
-
-	return Rows.grid(layoutOrder, 2, {
-		Simplify = button(
-			1,
-			"Simplify",
-			Icons.SimplifyMode,
-			"Simplify",
-			"**Fewer triangles where you want them**: mark points, check the preview, then `Apply`.\n\n"
-				.. "The area around removed points fills in with larger triangles.\n\n"
-				.. "> Hold `Ctrl` to mark removed points to come back. Corners always stay."
-		),
-
-		Holes = button(
-			2,
-			"Cut holes",
-			Icons.CutMode,
-			"Holes",
-			"**Delete triangles** from tiles, for paths and openings.\n\n"
-				.. "Holes are outlined while you hover a tile.\n\n"
-				.. "> Hold `Ctrl` to restore them. Turn on `Fine` for single triangles."
-		),
-	})
-end
+local MODES: { Rows.Tab<Settings.MeshMode> } = {
+	{
+		id = "Simplify",
+		label = "Simplify",
+		icon = Icons.SimplifyMode,
+		tip = "**Fewer triangles where you want them**: mark points, check the preview, then `Apply`.\n\n"
+			.. "The area around removed points fills in with larger triangles.\n\n"
+			.. "> Hold `Ctrl` to mark removed points to come back. Corners always stay.",
+	},
+	{
+		id = "Holes",
+		label = "Cut holes",
+		icon = Icons.CutMode,
+		tip = "**Delete triangles** from tiles, for paths and openings.\n\n"
+			.. "Holes are outlined while you hover a tile.\n\n"
+			.. "> Hold `Ctrl` to restore them. Turn on `Fine` for single triangles.",
+	},
+}
 
 local function run(action: () -> ())
 	local ok, err: unknown = pcall(action)
@@ -114,15 +89,11 @@ local function MeshPage(props: { settings: Settings.State })
 	local marked = not MeshStage.isEmpty()
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(
-			1,
-			"Mesh",
-			Settings.stopViewportTool,
-			"**Stop the Mesh tool** (`Esc`).\n\n"
-				.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on."
-		),
-
-		Mode = modeRow(2, settings),
+		Mode = Rows.segmented(1, MODES, settings.meshMode, function (mode: Settings.MeshMode)
+			Settings.update(function (s)
+				s.meshMode = mode
+			end)
+		end),
 
 		Radius = Rows.property(
 			5,
@@ -171,7 +142,7 @@ local function MeshPage(props: { settings: Settings.State })
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
-			"**Limit the brush** to selected tiles.\n\nWhen off, works on any terrain under the cursor."
+			"**Limit the brush** to selected tiles."
 		),
 	}
 
@@ -183,12 +154,7 @@ local function MeshPage(props: { settings: Settings.State })
 			else "every tile"
 		local noScope = not hasTiles or (selected == 0 and settings.paintSelectedOnly)
 
-		children.Auto = Rows.collapsible(
-			10,
-			"auto-simplify",
-			"Auto-simplify",
-			"**Mark points in bulk**: every point on flat enough ground, or every removed point.\n\n> Click to show or hide.",
-			{
+		children.Auto = Rows.collapsible(10, "auto-simplify", "Auto-simplify", nil, {
 				Angle = Rows.property(
 					1,
 					"Max angle",
@@ -326,7 +292,13 @@ local function MeshPage(props: { settings: Settings.State })
 		children.Warning = Rows.paragraph(3, "No tiles selected. Select tiles or turn off Selected only.", "warning")
 	end
 
-	return Rows.page(children)
+	return Rows.tool(
+		"Mesh",
+		Settings.stopViewportTool,
+		"**Stop the Mesh tool** (`Esc`).\n\n"
+			.. "Marked points that were not applied are dropped. Bakes edited tiles if `Bake automatically` is on.",
+		children
+	)
 end
 
 return MeshPage

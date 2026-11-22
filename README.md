@@ -2,9 +2,9 @@
 
 Hammer-style displacement terrain for Roblox Studio.
 
-![Version](https://img.shields.io/badge/version-1.0.0--beta.1-informational)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
-![Roblox Studio](https://img.shields.io/badge/Roblox%20Studio-plugin-lightgrey)
+[![Release](https://img.shields.io/github/v/release/Rhgx/strata?include_prereleases&style=flat-square&label=release&labelColor=1b1f23&color=2f81f7)](https://github.com/Rhgx/strata/releases)
+[![License](https://img.shields.io/github/license/Rhgx/strata?style=flat-square&labelColor=1b1f23&color=3fb950)](LICENSE)
+[![Issues](https://img.shields.io/github/issues/Rhgx/strata?style=flat-square&labelColor=1b1f23&color=d29922)](https://github.com/Rhgx/strata/issues)
 
 Turn block and wedge parts into editable displacement tiles, sculpt and paint them, then bake each tile into unions that publish and reopen like any Roblox model.
 
@@ -38,7 +38,7 @@ Turn block and wedge parts into editable displacement tiles, sculpt and paint th
 5. Stop the tool (<kbd>Esc</kbd>). Edited tiles bake automatically and unbake on the next edit.
 
 > [!TIP]
-> All eight tools and **Edit points** register bindable actions under **File > Advanced > Customize Shortcuts** (search for `Strata`).
+> All eight tools, **Edit points**, and toggling the panel register bindable actions under **File > Advanced > Customize Shortcuts** (search for `Strata`).
 
 ## Build from source
 

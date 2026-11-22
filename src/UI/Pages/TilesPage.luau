@@ -296,20 +296,14 @@ local function resetSection(layoutOrder: number, info: Query.SelectionInfo)
 		.. "The full grid of triangles returns, on the surface as it is now.\n\n"
 		.. (if noPoints then "> No removed points on the selected tiles." else "> Remove points with the `Mesh` tool's `Simplify` mode.")
 
-	return Rows.collapsible(
-		layoutOrder,
-		"reset",
-		`Reset ({info.modified})`,
-		"**Reset edits** on the selected tiles.\n\n" .. "> Click to show or hide.",
-		{
-			Grid = Rows.grid(1, 2, {
-				ResetShape = actionButton(1, "Reset shape", Icons.ResetShape, noShape, resetShape, resetTip),
-				ClearPaint = actionButton(2, "Clear paint", Icons.ClearPaint, noPaint, clearPaint, clearTip),
-				FillHoles = actionButton(3, "Fill holes", Icons.FillHoles, noHoles, fillHoles, fillTip),
-				Unsimplify = actionButton(4, "Unsimplify", Icons.Unsimplify, noPoints, unsimplify, unsimplifyTip),
-			}),
-		}
-	)
+	return Rows.collapsible(layoutOrder, "reset", `Reset ({info.modified})`, nil, {
+		Grid = Rows.grid(1, 2, {
+			ResetShape = actionButton(1, "Reset shape", Icons.ResetShape, noShape, resetShape, resetTip),
+			ClearPaint = actionButton(2, "Clear paint", Icons.ClearPaint, noPaint, clearPaint, clearTip),
+			FillHoles = actionButton(3, "Fill holes", Icons.FillHoles, noHoles, fillHoles, fillTip),
+			Unsimplify = actionButton(4, "Unsimplify", Icons.Unsimplify, noPoints, unsimplify, unsimplifyTip),
+		}),
+	})
 end
 
 local function growSelection()
@@ -351,9 +345,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 			"Selected",
 			summary,
 			nil,
-			`**Selected**: {summary}\n\n`
-				.. "Selecting a terrain area or inner part selects its tiles.\n\n"
-				.. "> Extra parts in the selection are used by `Sew tiles`."
+			`**Selected**: {summary}\n\n` .. "> Extra parts in the selection are used by `Sew tiles`."
 		),
 
 		Detail = Rows.property(
@@ -526,13 +518,7 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
 		}),
 
-		Noise = Rows.collapsible(
-			8,
-			"noise",
-			"Noise",
-			"**Add random bumps** to selected tiles.\n\n"
-				.. "> Click to show or hide.",
-			{
+		Noise = Rows.collapsible(8, "noise", "Noise", nil, {
 				Min = Rows.property(
 					1,
 					"Min",

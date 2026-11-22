@@ -16,6 +16,7 @@ local StudioComponents = require(Packages.StudioComponents)
 
 local Settings = require(Plugin.State.Settings)
 
+local Rows = require(UI.Rows)
 local Icons = require(UI.Icons)
 local Accent = require(UI.Accent)
 local Tooltip = require(UI.Tooltip)
@@ -55,13 +56,15 @@ local ICONS: { [Settings.Tool]: Icons.Icon } = {
 
 export type Props = {
 	active: Settings.Tool?,
+	hasTiles: boolean,
 }
 
 -- Custom tool button because StudioComponents buttons only accept theme color roles. Idle brush
 -- tools tint their icon in the tool's accent color; the active brush swaps background and icon
 -- colors so the running tool stands out at a glance. Neutral click tools (Pick faces, Stitch)
--- use Studio's standard selected style.
-local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
+-- use Studio's standard selected style. When the place has no terrain yet, terrain-dependent
+-- tools dim to DimmedText as a hint while staying clickable.
+local function ToolButton(props: { tool: Settings.Tool, selected: boolean, dimmed: boolean })
 	local theme = StudioComponents.useTheme()
 	local hovered, setHovered = React.useState(false)
 	local pressed, setPressed = React.useState(false)
@@ -88,7 +91,9 @@ local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
 	else
 		background = theme:GetColor(Enum.StudioStyleGuideColor.Button, modifier)
 		border = theme:GetColor(Enum.StudioStyleGuideColor.ButtonBorder, modifier)
-		iconColor = accent or theme:GetColor(Enum.StudioStyleGuideColor.ButtonText, modifier)
+		iconColor = if props.dimmed and not props.selected
+			then theme:GetColor(Enum.StudioStyleGuideColor.DimmedText)
+			else accent or theme:GetColor(Enum.StudioStyleGuideColor.ButtonText, modifier)
 	end
 
 	return e("TextButton", {
@@ -117,6 +122,10 @@ local function ToolButton(props: { tool: Settings.Tool, selected: boolean })
 		end,
 
 		[React.Event.Activated] = function ()
+			if Rows.exitGuarded() then
+				return
+			end
+
 			Settings.toggleTool(props.tool)
 		end,
 	}, {
@@ -137,7 +146,7 @@ local function ToolStrip(props: Props)
 	local theme = StudioComponents.useTheme()
 	local children: { [string]: unknown } = {
 		Divider = e("Frame", {
-			Position = UDim2.fromOffset(BRUSHES * (BUTTON + GAP) + (DIVIDER - GAP) // 2 - 1, 5),
+			Position = UDim2.fromOffset(BRUSHES * (BUTTON + GAP) + (DIVIDER - GAP) // 2 - 1, 4),
 			Size = UDim2.new(0, 1, 0, BUTTON - 6),
 			BorderSizePixel = 0,
 			BackgroundColor3 = theme:GetColor(Enum.StudioStyleGuideColor.Border),
@@ -154,15 +163,19 @@ local function ToolStrip(props: Props)
 
 	for index, tool: Settings.Tool in Settings.tools() do
 		local x = (index - 1) * (BUTTON + GAP) + (if index > BRUSHES then DIVIDER else 0)
+		local dimmed = not props.hasTiles and tool ~= "PickFaces"
+		local tip = if dimmed
+			then `{TIPS[tool]}\n\n> No terrain yet. Use Pick faces or select parts first.`
+			else TIPS[tool]
 		children[tool] = e(Tooltip, {
-			Text = TIPS[tool],
+			Text = tip,
 			Position = UDim2.fromOffset(x, 1),
 			Size = UDim2.fromOffset(BUTTON, BUTTON),
-		}, e(ToolButton, { tool = tool, selected = props.active == tool }))
+		}, e(ToolButton, { tool = tool, selected = props.active == tool, dimmed = dimmed }))
 	end
 
 	return e("Frame", {
-		Size = UDim2.new(1, 0, 0, BUTTON + 4),
+		Size = UDim2.new(1, 0, 0, Rows.BAR_HEIGHT),
 		BackgroundTransparency = 1,
 	}, {
 		Padding = e("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7), PaddingTop = UDim.new(0, 1) }),

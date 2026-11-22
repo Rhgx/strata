@@ -26,7 +26,8 @@ local Tooltip = require(UI.Tooltip)
 
 local e = React.createElement
 
-local HEIGHT = 24
+local HEIGHT = 26
+local GUTTER = 7
 local BUTTON_SIZE = 22
 local BUTTON_GAP = 4
 
@@ -71,7 +72,7 @@ local function overlayButton(
 		{
 			Text = if open then closeTip else openTip,
 			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -2 - slot * (BUTTON_SIZE + BUTTON_GAP), 0.5, 1),
+			Position = UDim2.new(1, -GUTTER - slot * (BUTTON_SIZE + BUTTON_GAP), 0.5, 0),
 			Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),
 		},
 		e(StudioComponents.Button, {
@@ -121,7 +122,9 @@ local function StatusBar(props: Props)
 			Tooltip,
 			{
 				Text = if dismissable then `{text}\n\n> Click to dismiss.` else text,
-				Size = UDim2.new(1, -(BUTTON_SIZE * rightButtons + BUTTON_GAP * (rightButtons - 1) + 12), 1, -1),
+				Essential = true,
+				Position = UDim2.fromOffset(0, 1),
+				Size = UDim2.new(1, -(GUTTER + BUTTON_SIZE * rightButtons + BUTTON_GAP * (rightButtons - 1) + 4), 1, -1),
 			},
 			e("Frame", {
 				Size = UDim2.fromScale(1, 1),
@@ -137,8 +140,8 @@ local function StatusBar(props: Props)
 				end,
 			}, {
 				Label = e(StudioComponents.Label, {
-					Position = UDim2.fromOffset(7, 1),
-					Size = UDim2.new(1, -7, 1, 0),
+					Position = UDim2.fromOffset(GUTTER, 0),
+					Size = UDim2.new(1, -GUTTER, 1, 0),
 					Text = text,
 					TextXAlignment = Enum.TextXAlignment.Left,
 					TextTruncate = Enum.TextTruncate.AtEnd,
@@ -167,12 +170,12 @@ local function StatusBar(props: Props)
 				{
 					Text = "**Cancel** the current operation.\n\n> Work already finished is kept.",
 					AnchorPoint = Vector2.new(1, 0.5),
-					Position = UDim2.new(1, -2 - 2 * (BUTTON_SIZE + BUTTON_GAP), 0.5, 1),
+					Position = UDim2.new(1, -GUTTER - 2 * (BUTTON_SIZE + BUTTON_GAP), 0.5, 0),
 					Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),
 				},
 				e(StudioComponents.Button, {
 					Size = UDim2.fromScale(1, 1),
-					Icon = Icons.Clear,
+					Icon = Icons.Close,
 					OnActivated = onCancel,
 				})
 			)

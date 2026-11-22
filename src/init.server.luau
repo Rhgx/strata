@@ -62,6 +62,10 @@ local function restoreSettings()
 			s.showBrushDots = saved.showBrushDots
 		end
 
+		if typeof(saved.showTooltips) == "boolean" then
+			s.showTooltips = saved.showTooltips
+		end
+
 		if typeof(saved.radius) == "number" then
 			s.radius = saved.radius
 		end
@@ -255,6 +259,7 @@ local function snapshotSettings(s: Settings.State): { [string]: unknown }
 		smoothingAngle = s.smoothingAngle,
 		showKeyHints = s.showKeyHints,
 		showBrushDots = s.showBrushDots,
+		showTooltips = s.showTooltips,
 		paintMaterial = s.paintMaterial.Name,
 		paintColor = s.paintColor:ToHex(),
 		paintVariant = s.paintVariant,

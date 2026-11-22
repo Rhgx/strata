@@ -10,9 +10,9 @@ Source: `src/UI/App.luau`
 
 The panel is built with React-Lua, `StudioComponents`, and Lucide icons (`latte-soft/lucide-icons`) and stays usable down to the 220 px minimum dock width (~190 px inner content width). It has three vertical regions:
 
-1. **Tool strip** (`src/UI/ToolStrip.luau`): 30 px pinned top bar holding all eight viewport tools as 24x24 icon buttons (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, `Mesh`, divider, `Pick faces`, `Stitch`). Drawn by hand (`ToolButton`) for tool accent tinting; hidden while an overlay is open.
-2. **Context page** (`src/UI/Pages/`): middle scrollable area keyed by page name so switching contexts resets scroll to the top.
-3. **Status bar** (`src/UI/StatusBar.luau`): 24 px pinned footer showing `State/Status` messages (click to dismiss, hover to pause expiry and read full text) or an idle hint, plus cancel (during multi-tile bakes), Settings, and Help buttons.
+1. **Band 1: Tool strip or Overlay header** (`src/UI/ToolStrip.luau`, `src/UI/Rows.luau`): 30 px pinned top bar (hairline at `y = 29`). Normal and tool views show all eight viewport tools as 24x24 icon buttons (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, `Mesh`, divider, `Pick faces`, `Stitch`); terrain-dependent tools dim when the place has no tiles while staying clickable. `Settings` and `Help` swap Band 1 in place with a slot-aligned 24x24 Back button (`arrow-left`, `16x16`) and a 16 px bold title.
+2. **Band 2 + Context page** (`src/UI/Pages/`): tool pages, Edit points, and overlays pin a matching 30 px chrome band directly beneath Band 1 (hairline at `y = 59`, body at `y = 60`), keeping every horizontal gutter aligned to 7 px. Tool pages show a left 24x24 Stop/Back button + 16 px bold title; overlays pin their full-width segmented tabs in Band 2. Home pages (`OverviewPage`, `TilesPage`, `CreatePage` in parts mode) omit Band 2.
+3. **Status bar** (`src/UI/StatusBar.luau`): 26 px pinned footer with 7 px gutters showing `State/Status` messages (click to dismiss, hover to pause expiry and read full text) or an idle hint, plus Cancel (during multi-tile bakes), Settings, and Help buttons (`16x16` icons).
 
 ### Page priority
 
@@ -26,8 +26,8 @@ The panel is built with React-Lua, `StudioComponents`, and Lucide icons (`latte-
 | 6 | Fallback (nothing relevant selected) | `OverviewPage` |
 
 Notes:
-- **Overlays**: `SettingsPage` (**Edges | Baking | Interface**) and `HelpPage` (**Guide | Keys | About**) both use `Rows.overlay` and remember their last tab per session. `HelpPage`'s **About** tab shows plugin version, license, click-to-select source link, and author.
-- **Tool pages**: open with `Rows.title` (tool name + icon-only Stop button). In `MeshPage`'s **Simplify** mode, staged **Result** and **Apply / Clear** appear below **Auto-simplify** so **Select flat** never shifts under the cursor.
+- **Overlays**: `SettingsPage` (**Edges | Baking | Interface**) and `HelpPage` (**Guide | Keys | About**) use `Rows.overlay` (Back + 16 px title in Band 1, pinned full-width tabs in Band 2) and remember their last tab per session.
+- **Tool pages**: all tools use `Rows.tool` (Stop + 16 px title in Band 2; `PointsPage` uses the Back icon). Multi-mode tools (`MaterialPage`, `MeshPage`) place their segmented mode toggle as the first body row via `Rows.segmented`. In `MeshPage`'s **Simplify** mode, staged **Result** and **Apply / Clear** appear below **Auto-simplify** so **Select flat** never shifts under the cursor.
 - **`TilesPage`**: flows top-to-bottom as Properties, 2x3 **Actions** grid (**Add nearby**, **Edit points**, **Round folds**, **Split 2x2**, **Sew tiles**, **Stitch parts**), collapsed **Noise**, collapsed **Reset (N)** (fixed 2x2 grid: **Reset shape**, **Clear paint**, **Fill holes**, **Unsimplify**), divider, and **Bake / Unbake**.
 
 ### Reactive hooks and helpers
@@ -62,25 +62,26 @@ Light themes automatically switch to darker variants based on `MainBackground` l
 
 Source: `src/UI/Rows.luau`
 
-Layout constants: `LABEL_WIDTH = 66`, `ROW_HEIGHT = 22`, `BUTTON_HEIGHT = 24`, `GAP = 4`.
+Layout constants: `LABEL_WIDTH = 66`, `ROW_HEIGHT = 22`, `BUTTON_HEIGHT = 24`, `BAR_HEIGHT = 30`, `BAR_BUTTON = 24`, `GAP = 4`, `GUTTER = 7`.
 
 | Helper | Purpose |
 | --- | --- |
-| `Rows.page` | `ScrollFrame` oversized by 1 px per side so the panel clips its border cleanly |
+| `Rows.page` | `ScrollFrame` oversized by 1 px per side with 8 px horizontal padding (exact 7 px gutter) |
 | `Rows.section`, `Rows.divider` | Dimmed bold section headings and 1 px themed dividers |
-| `Rows.title`, `Rows.header` | Tool header (name + Stop) and overlay header (Back + title) |
-| `Rows.overlay` | Pinned overlay header, equal-width tab strip, divider, and tab-keyed scroll body |
-| `Rows.property`, `Rows.value` | Two-column rows (66 px label + control/text) with full-row tooltips |
+| `Rows.tool` | Pinned 30 px Band 2 (left Stop/Back button + 16 px bold title) above a scrollable body |
+| `Rows.overlay` | Pinned Band 1 (Back + 16 px bold title) + pinned Band 2 (full-width tabs) above a tab-keyed scroll body |
+| `Rows.segmented` | Full-width equal-width segmented button row for tool mode switches |
+| `Rows.property`, `Rows.value` | Two-column rows (66 px label + control/text) with optional full-row tooltips |
 | `Rows.grid` | Equal-width `UIGridLayout` rows (2 columns fit cleanly at minimum width) |
 | `Rows.button`, `Rows.checkbox` | Full-width controls with optional 14 px icon (`button`) and hover tooltips |
 | `Rows.paragraph` | Wrapping themed `TextLabel` with `AutomaticSize.Y` |
-| `Rows.collapsible` | Chevron-headed section (optional icon/tint) with session-persisted open state |
+| `Rows.collapsible` | Chevron-headed section (optional icon/tint and tooltip) with session-persisted open state |
 
 ## Tooltips and markup
 
 Source: `src/UI/Tooltip.luau`, `src/UI/Markup.luau`
 
-`Tooltip` wraps one child in a transparent frame. After hovering `0.4` s, it converts the tooltip string via `Markup.toRichText`, measures bounds via `TextService:GetTextBoundsAsync` (max `240` px), clamps inside the `PluginGui`, and portals at `ZIndex = 1000`. Clicking hides the tooltip until re-entry.
+`Tooltip` wraps one child in a transparent frame. After hovering `0.4` s, it converts the tooltip string via `Markup.toRichText`, finds a balanced wrap width via `TextService:GetTextBoundsAsync` (max `240` px), clamps inside the `PluginGui`, and portals at `ZIndex = 1000`. Backtick spans use non-breaking spaces so key combos (`Ctrl + C`) never split across lines. Clicking hides the tooltip until re-entry. Turning off **Settings > Interface > Show tooltips** suppresses all tooltips except `Essential = true` (the status bar message).
 
 | Syntax | RichText output |
 | --- | --- |

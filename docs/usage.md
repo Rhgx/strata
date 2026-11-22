@@ -8,7 +8,7 @@ Tools, viewport shortcuts, sculpt axes, cursors, Edit points, and settings refer
 
 ## Viewport shortcuts
 
-All eight tools and **Edit points** register bindable actions under **File > Advanced > Customize Shortcuts** (search for `Strata`). While a tool runs, a shortcut strip appears along the bottom of the 3D view (toggle under **Settings > Interface > Show viewport key hints**).
+All eight tools, **Edit points**, and **Toggle panel** register bindable actions under **File > Advanced > Customize Shortcuts** (search for `Strata`). While a tool runs, a shortcut strip appears along the bottom of the 3D view (toggle under **Settings > Interface > Show viewport key hints**).
 
 ### Shared shortcuts
 
@@ -96,4 +96,4 @@ Open **Settings** from the gear icon in the bottom status bar:
 
 - **Edges**: **Auto-sew after edits**, **Keep edges stitched**, and default stitch **Reach**.
 - **Baking**: **Bake automatically**, union **Smoothing** angle, bake **Optimization** options ([Baking](baking.md#bake-optimizations)), and **Rebake all**.
-- **Interface**: **Show viewport key hints**, **Show brush dots**, and **Tools on Plugins ribbon**.
+- **Interface**: **Show viewport key hints**, **Show brush dots**, **Show tooltips**, and **Tools on Plugins ribbon**.

@@ -33,6 +33,7 @@ type ToggleKey =
 	| "autoBake"
 	| "showKeyHints"
 	| "showBrushDots"
+	| "showTooltips"
 	| "ribbonTools"
 	| "bakeSimplifyEdges"
 	| "bakeFlatPart"
@@ -41,9 +42,9 @@ type ToggleKey =
 type Tab = "edges" | "baking" | "interface"
 
 local TABS: { Rows.Tab<Tab> } = {
-	{ id = "edges", label = "Edges", tip = "**Edges and stitching**: sewing tile seams and snapping edges onto parts." },
-	{ id = "baking", label = "Baking", tip = "**Baking**: merging tiles into unions, shading and bake optimizations." },
-	{ id = "interface", label = "Interface", tip = "**Interface**: 3D view hints, brush dots and ribbon buttons." },
+	{ id = "edges", label = "Edges" },
+	{ id = "baking", label = "Baking" },
+	{ id = "interface", label = "Interface" },
 }
 
 -- Require a second confirmation click for Rebake all above this tile count.
@@ -66,6 +67,8 @@ local function toggle(key: ToggleKey)
 				s.showKeyHints = not s.showKeyHints
 			elseif key == "showBrushDots" then
 				s.showBrushDots = not s.showBrushDots
+			elseif key == "showTooltips" then
+				s.showTooltips = not s.showTooltips
 			elseif key == "bakeSimplifyEdges" then
 				s.bakeSimplifyEdges = not s.bakeSimplifyEdges
 			elseif key == "bakeFlatPart" then
@@ -316,7 +319,7 @@ local function interfaceTab(settings: Settings.State)
 			"Show viewport key hints",
 			settings.showKeyHints,
 			toggle("showKeyHints"),
-			"**Show shortcut bar** in the 3D view.\n\n" .. "Displays active keys along the bottom of the viewport while a tool runs."
+			"Displays active keys along the bottom of the 3D view while a tool runs."
 		),
 
 		BrushDots = Rows.checkbox(
@@ -329,10 +332,20 @@ local function interfaceTab(settings: Settings.State)
 				.. "> Off by default: the brush ring alone still dims when it holds no point."
 		),
 
-		RibbonHeading = Rows.section(4, "Ribbon"),
+		PanelHeading = Rows.section(4, "Panel"),
+
+		Tooltips = Rows.checkbox(
+			5,
+			"Show tooltips",
+			settings.showTooltips,
+			toggle("showTooltips"),
+			"Status bar messages still show their full text on hover."
+		),
+
+		RibbonHeading = Rows.section(6, "Ribbon"),
 
 		RibbonTools = Rows.checkbox(
-			5,
+			7,
 			"Tools on Plugins ribbon",
 			settings.ribbonTools,
 			toggle("ribbonTools"),
@@ -346,11 +359,16 @@ end
 local function SettingsPage(props: { settings: Settings.State })
 	local settings = props.settings
 	local tab, setTab = React.useState(lastTab)
+	local active = Settings.activeTool(settings)
+	local backTip = if active
+		then `**Back to {Settings.toolLabel(active)}** (\`Esc\`).`
+		elseif settings.editingPoints then "**Back to Edit points** (`Esc`)."
+		else "**Back** (`Esc`)."
 	local content = if tab == "edges" then edgesTab(settings) elseif tab == "baking" then bakingTab(settings) else interfaceTab(settings)
 
 	return Rows.overlay("Settings", function ()
 		Settings.setOverlay("none")
-	end, "**Close settings** (`Esc`).", TABS, tab, function (nextTab: Tab)
+	end, backTip, TABS, tab, function (nextTab: Tab)
 		lastTab = nextTab
 		setTab(nextTab)
 	end, content)

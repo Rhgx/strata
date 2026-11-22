@@ -40,7 +40,7 @@ local function item(name: string): Icon
 end
 
 return table.freeze({
-	-- Tool strip and status bar (16 px).
+	-- Tool strip, chrome bands, and status bar (16 px).
 	Raise = icon("arrow-up-from-line"),
 	Lower = icon("arrow-down-to-line"),
 	Smooth = icon("waves"),
@@ -49,16 +49,17 @@ return table.freeze({
 	Mesh = icon("triangle"),
 	PickFaces = icon("mouse-pointer-click"),
 	Stitch = icon("magnet"),
+	Back = icon("arrow-left"),
+	Stop = icon("circle-stop"),
+	Close = icon("x"),
 	Help = icon("circle-help"),
 	Settings = icon("settings"),
 	ChevronRight = icon("chevron-right"),
 	ChevronDown = icon("chevron-down"),
 
 	-- In-page buttons (14 px).
-	StopTool = item("circle-stop"),
 	Clear = item("x"),
 	CopyAppearance = item("pipette"),
-	Back = item("arrow-left"),
 	Select = item("box-select"),
 	EditTiles = item("sliders-horizontal"),
 	EditPoints = item("pen-tool"),
@@ -81,6 +82,7 @@ return table.freeze({
 	SimplifyMode = item("minimize-2"),
 	CutMode = item("scissors"),
 	ApplyMarks = item("check"),
+	Warning = item("triangle-alert"),
 
 	-- Dropdown items (14 px).
 	FacesTop = item("arrow-up"),

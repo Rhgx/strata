@@ -68,13 +68,6 @@ local function BrushPage(props: { settings: Settings.State })
 	local mode: Settings.BrushMode = settings.mode
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(
-			1,
-			Settings.modeLabel(mode),
-			Settings.stopViewportTool,
-			"**Stop painting** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
-		),
-
 		Radius = Rows.property(
 			3,
 			"Radius",
@@ -85,7 +78,7 @@ local function BrushPage(props: { settings: Settings.State })
 				RadiusPreview.pulse()
 			end),
 			"**Brush size** in studs.\n\n"
-				.. "Only points inside the ring move. Between points, the ring dims instead of moving anything (turn on `Show brush dots` in `Settings` to mark points). Use a finer grid (`Detail`, or `Split 2x2` then `Detail`) for more points.\n\n"
+				.. "Only points inside the ring move; raise `Detail` for more points.\n\n"
 				.. "> Resize in 3D: `Ctrl + Scroll` or `Alt + Drag`."
 		),
 
@@ -126,8 +119,7 @@ local function BrushPage(props: { settings: Settings.State })
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
-			"**Limit brush** to selected tiles.\n\n"
-				.. "When off, paints any terrain under the cursor."
+			"**Limit the brush** to selected tiles."
 		),
 	}
 
@@ -251,7 +243,12 @@ local function BrushPage(props: { settings: Settings.State })
 		children.Warning = Rows.paragraph(2, "No tiles selected. Select tiles or turn off Selected only.", "warning")
 	end
 
-	return Rows.page(children)
+	return Rows.tool(
+		Settings.modeLabel(mode),
+		Settings.stopViewportTool,
+		"**Stop painting** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on.",
+		children
+	)
 end
 
 return BrushPage

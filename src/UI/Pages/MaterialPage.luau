@@ -86,7 +86,7 @@ local function RecentSwatch(props: { look: Settings.RecentLook, current: boolean
 	local variant = if look.variant ~= "" then ` ({look.variant})` else ""
 
 	return e(Tooltip, {
-		Text = `**{Appearance.label(look.material)}{variant}**, #{look.color:ToHex():upper()}\n\n> Click to paint with this look.`,
+		Text = `**{Appearance.label(look.material)}{variant}**, #{look.color:ToHex():upper()}`,
 		LayoutOrder = props.order,
 		Size = UDim2.fromOffset(SWATCH, SWATCH),
 	}, e("TextButton", {
@@ -139,58 +139,33 @@ local function recentRow(layoutOrder: number, settings: Settings.State)
 	return Rows.property(layoutOrder, "Recent", e("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, swatches))
 end
 
--- Two-button Paint/Erase toggle so the active mode is always visible (matching MeshPage).
-local function modeRow(layoutOrder: number, settings: Settings.State)
-	local function button(order: number, text: string, icon: Icons.Icon, erase: boolean, tooltip: string)
-		return Rows.withTooltip(
-			tooltip,
-			e(StudioComponents.Button, {
-				Size = UDim2.fromScale(1, 1),
-				Text = text,
-				Icon = icon,
-				Selected = settings.paintErase == erase,
+type PaintMode = "paint" | "erase"
 
-				OnActivated = function ()
-					Settings.update(function (s)
-						s.paintErase = erase
-					end)
-				end,
-			}),
-			order
-		)
-	end
-
-	return Rows.grid(layoutOrder, 2, {
-		Paint = button(
-			1,
-			"Paint",
-			Icons.PaintMode,
-			false,
-			"**Paint the look below** into tiles.\n\n> Hold `Ctrl` to erase instead."
-		),
-
-		Erase = button(
-			2,
-			"Erase",
-			Icons.EraseMode,
-			true,
-			"**Erase painted looks** back to each tile's own look. Holes stay.\n\n> Hold `Ctrl` to paint instead."
-		),
-	})
-end
+local MODES: { Rows.Tab<PaintMode> } = {
+	{
+		id = "paint",
+		label = "Paint",
+		icon = Icons.PaintMode,
+		tip = "**Paint the look below** into tiles.\n\n> Hold `Ctrl` to erase instead.",
+	},
+	{
+		id = "erase",
+		label = "Erase",
+		icon = Icons.EraseMode,
+		tip = "**Erase painted looks** back to each tile's own look. Holes stay.\n\n> Hold `Ctrl` to paint instead.",
+	},
+}
 
 local function MaterialPage(props: { settings: Settings.State })
 	local settings = props.settings
+	local activeMode: PaintMode = if settings.paintErase then "erase" else "paint"
 
 	local children: { [string]: unknown } = {
-		Title = Rows.title(
-			1,
-			"Material",
-			Settings.stopViewportTool,
-			"**Stop the Material tool** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on."
-		),
-
-		Mode = modeRow(2, settings),
+		Mode = Rows.segmented(1, MODES, activeMode, function (mode: PaintMode)
+			Settings.update(function (s)
+				s.paintErase = mode == "erase"
+			end)
+		end),
 
 		Material = Rows.property(
 			5,
@@ -294,8 +269,7 @@ local function MaterialPage(props: { settings: Settings.State })
 					s.paintSelectedOnly = not s.paintSelectedOnly
 				end)
 			end,
-			"**Limit the brush** to selected tiles.\n\n"
-				.. "When off, works on any terrain under the cursor."
+			"**Limit the brush** to selected tiles."
 		),
 	}
 
@@ -310,7 +284,12 @@ local function MaterialPage(props: { settings: Settings.State })
 		children.Warning = Rows.paragraph(3, "No tiles selected. Select tiles or turn off Selected only.", "warning")
 	end
 
-	return Rows.page(children)
+	return Rows.tool(
+		"Material",
+		Settings.stopViewportTool,
+		"**Stop the Material tool** (`Esc`).\n\nBakes edited tiles if `Bake automatically` is on.",
+		children
+	)
 end
 
 return MaterialPage

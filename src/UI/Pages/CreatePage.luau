@@ -134,12 +134,8 @@ local function CreatePage(props: Props)
 
 		Create = Rows.withTooltip(
 			if picking
-				then "**Replace picked faces** with terrain.\n\n"
-					.. "Builds editable tiles in one step.\n\n"
-					.. "> `Ctrl + Z` restores the original parts."
-				else "**Replace chosen faces** with terrain.\n\n"
-					.. "Builds editable tiles from selected parts.\n\n"
-					.. "> `Ctrl + Z` restores the original parts.",
+				then "**Replace picked faces** with terrain.\n\n" .. "> `Ctrl + Z` restores the original parts."
+				else "**Replace chosen faces** with terrain.\n\n" .. "> `Ctrl + Z` restores the original parts.",
 			e(StudioComponents.MainButton, {
 				Size = UDim2.fromScale(1, 1),
 				Text = createText,
@@ -160,13 +156,6 @@ local function CreatePage(props: Props)
 	}
 
 	if picking then
-		children.Title = Rows.title(
-			1,
-			"Pick faces",
-			Settings.stopViewportTool,
-			"**Stop picking** (`Esc`).\n\nClears any picked faces."
-		)
-
 		if #picks > 0 then
 			-- Keep the Clear button tooltip as a sibling of the value row so hovering Clear does
 			-- not trigger both tooltips at once.
@@ -184,8 +173,7 @@ local function CreatePage(props: Props)
 						"Picked",
 						`{Format.plural(#picks, "face")} ({Format.plural(plan.parts, "part")})`,
 						nil,
-						"**Picked faces**, highlighted in 3D.\n\n"
-							.. "> Click a picked face again to unpick it."
+						"Click a picked face again to unpick it."
 					),
 				}),
 
@@ -207,14 +195,7 @@ local function CreatePage(props: Props)
 			})
 		end
 	else
-		children.Selected = Rows.value(
-			1,
-			"Selected",
-			Format.plural(#Query.selectedParts(), "part"),
-			nil,
-			"**Selected parts** that `Create` will convert.\n\n"
-				.. "> Supports block and wedge parts."
-		)
+		children.Selected = Rows.value(1, "Selected", Format.plural(#Query.selectedParts(), "part"))
 
 		children.Faces = Rows.property(
 			3,
@@ -247,14 +228,7 @@ local function CreatePage(props: Props)
 
 	-- Preview counts directly above the Create button.
 	if plan.faces > 0 then
-		children.Result = Rows.value(
-			9,
-			"Result",
-			`{Format.plural(plan.tiles, "tile")}, {Format.count(plan.wedges)} wedges`,
-			nil,
-			"**Preview** of tiles and wedges to build.\n\n"
-				.. "> With `Bake automatically` on, each tile becomes 1 union."
-		)
+		children.Result = Rows.value(9, "Result", `{Format.plural(plan.tiles, "tile")}, {Format.count(plan.wedges)} wedges`)
 	elseif not picking then
 		children.Result = Rows.paragraph(9, "The selected faces are under 0.5 studs and cannot be converted.", "dimmed")
 	end
@@ -289,6 +263,10 @@ local function CreatePage(props: Props)
 				.. "Hammer-style grids stretch across rectangular faces.\n\n"
 				.. "> Lower `Tile size` or split long parts into closer-to-square pieces."
 		)
+	end
+
+	if picking then
+		return Rows.tool("Pick faces", Settings.stopViewportTool, "**Stop picking** (`Esc`).\n\nClears any picked faces.", children)
 	end
 
 	return Rows.page(children)

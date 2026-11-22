@@ -18,6 +18,8 @@ local React = require(Packages.React)
 local ReactRoblox = require(Packages.ReactRoblox)
 local StudioComponents = require(Packages.StudioComponents)
 
+local Settings = require(Plugin.State.Settings)
+
 local Markup = require(UI.Markup)
 
 local e = React.createElement
@@ -30,7 +32,10 @@ local MOUSE_OFFSET = Vector2.new(12, 18)
 local EDGE = 4
 
 type Props = {
-	Text: string,
+	-- Omit or pass nil to disable the popup while preserving the wrapper's layout box.
+	Text: string?,
+	-- Shows even when tooltips are turned off, for text with no other way to read it in full.
+	Essential: boolean?,
 	LayoutOrder: number?,
 	Size: UDim2?,
 	Position: UDim2?,
@@ -59,6 +64,25 @@ local function measure(rich: string, width: number): Vector2
 	return TextService:GetTextBoundsAsync(params)
 end
 
+-- Finds the narrowest width that keeps the same line count so multi-line tips balance instead of
+-- leaving a single trailing word on the last line. Yields.
+local function fit(rich: string, maxWidth: number): Vector2
+	local full = measure(rich, maxWidth)
+	local lo, hi = math.floor(maxWidth / 2), maxWidth
+
+	while hi - lo > 1 do
+		local mid = (lo + hi) // 2
+
+		if measure(rich, mid).Y <= full.Y then
+			hi = mid
+		else
+			lo = mid
+		end
+	end
+
+	return measure(rich, hi)
+end
+
 local function Tooltip(props: Props)
 	local theme = StudioComponents.useTheme()
 	local hovered, setHovered = React.useState(false)
@@ -67,12 +91,13 @@ local function Tooltip(props: Props)
 
 	React.useEffect(function ()
 		local cancelled = false
+		local text = props.Text
 
-		if hovered then
+		if hovered and text then
 			task.delay(DELAY_SECONDS, function ()
 				local frame = frameRef.current
 
-				if cancelled or not frame then
+				if cancelled or not frame or (not props.Essential and not Settings.get().showTooltips) then
 					return
 				end
 
@@ -83,12 +108,12 @@ local function Tooltip(props: Props)
 				end
 
 				local position = window:GetRelativeMousePosition()
-				local rich = Markup.toRichText(props.Text)
+				local rich = Markup.toRichText(text)
 				local maxWidth = math.max(60, math.min(MAX_WIDTH, window.AbsoluteSize.X - EDGE * 2) - PADDING_X * 2)
-				local ok, size = pcall(measure, rich, maxWidth)
+				local ok, size = pcall(fit, rich, maxWidth)
 
-				-- Guard after measuring because GetTextBoundsAsync yields and hover may have ended.
-				if ok and not cancelled then
+				-- Guard after measuring because GetTextBoundsAsync yields and hover or settings may have changed.
+				if ok and not cancelled and (props.Essential or Settings.get().showTooltips) then
 					setShown({ window = window, position = position, rich = rich, textSize = size })
 				end
 			end)

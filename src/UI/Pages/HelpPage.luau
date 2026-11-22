@@ -3,7 +3,7 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Read-only reference overlay opened from the status bar's ? button, organized into Guide,
-	Keys, and About tabs matching SettingsPage's pinned overlay shell.
+	Keys, and About tabs inside Rows.overlay's pinned Band 2 shell.
 ]]
 
 local UI = script.Parent.Parent
@@ -40,9 +40,9 @@ type WorkflowStep = {
 }
 
 local TABS: { Rows.Tab<Tab> } = {
-	{ id = "guide", label = "Guide", tip = "**Workflow and tile actions**: how Strata fits together." },
-	{ id = "keys", label = "Keys", tip = "**Keyboard and mouse shortcuts** for every tool." },
-	{ id = "about", label = "About", tip = "**Version**, license, and author." },
+	{ id = "guide", label = "Guide" },
+	{ id = "keys", label = "Keys" },
+	{ id = "about", label = "About" },
 }
 
 -- Leaves ~102 px for action labels at the minimum panel width, fitting every entry cleanly.
@@ -58,8 +58,8 @@ local SOURCE_URL = "github.com/Rhgx/strata"
 local lastTab: Tab = "guide"
 
 local WORKFLOW_STEPS: { WorkflowStep } = {
-	{ verb = "Create", text = "Select block or wedge parts and click Create, or use Pick faces.", icon = Icons.CreateArea },
-	{ verb = "Sculpt", text = "Use Raise, Lower, Smooth or Raise To, then drag on terrain.", icon = Icons.Raise, tool = "Raise" },
+	{ verb = "Create", text = "Select block or wedge parts and click Create, or use Pick\u{00A0}faces.", icon = Icons.CreateArea },
+	{ verb = "Sculpt", text = "Use Raise, Lower, Smooth or Raise\u{00A0}To, then drag on terrain.", icon = Icons.Raise, tool = "Raise" },
 	{ verb = "Paint", text = "Paint materials and colors onto tiles with Material.", icon = Icons.Material, tool = "Material" },
 	{ verb = "Mesh", text = "Simplify flat ground or cut holes with the Mesh tool.", icon = Icons.Mesh, tool = "Mesh" },
 	{ verb = "Edit", text = "Select tiles to change Detail, Material and the actions below.", icon = Icons.EditTiles },
@@ -291,6 +291,38 @@ local function AuthorRow(props: { LayoutOrder: number })
 	})
 end
 
+-- Muted beta footer note: icon blends WarningText toward DimmedText so it reads as a gentle
+-- caution without competing with the main info above.
+local function BetaNotice(props: { LayoutOrder: number })
+	local theme = StudioComponents.useTheme()
+	local dimmed = theme:GetColor(Enum.StudioStyleGuideColor.DimmedText)
+	local iconColor = theme:GetColor(Enum.StudioStyleGuideColor.WarningText):Lerp(dimmed, 0.5)
+
+	return e("Frame", {
+		LayoutOrder = props.LayoutOrder,
+		Size = UDim2.fromScale(1, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, {
+		Icon = iconImage(Icons.Warning, iconColor, UDim2.fromOffset(0, 1)),
+
+		Text = e("TextLabel", {
+			Position = UDim2.fromOffset(20, 0),
+			Size = UDim2.new(1, -20, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+			Text = "<b>Beta build.</b> Back up places before updating.",
+			RichText = true,
+			TextWrapped = true,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Font = StudioComponents.Constants.DefaultFont,
+			TextSize = StudioComponents.Constants.DefaultTextSize,
+			TextColor3 = dimmed,
+		}),
+	})
+end
+
 local function guideTab(theme: StudioTheme)
 	local mainColor = theme:GetColor(Enum.StudioStyleGuideColor.MainText)
 	local steps: { [string]: unknown } = {
@@ -317,7 +349,7 @@ local function guideTab(theme: StudioTheme)
 		ActionsHeading = Rows.section(3, "Tile actions"),
 		Actions = entryTable(4, TILE_ACTIONS, mainColor),
 		TipDivider = Rows.divider(5),
-		Tip = Rows.paragraph(6, "Hover any control for details. The gear opens Settings.", "dimmed"),
+		Tip = Rows.paragraph(6, "Hover controls for details. The gear opens Settings.", "dimmed"),
 	}
 end
 
@@ -329,15 +361,17 @@ local function keyGroup(
 	icon: Icons.Icon,
 	iconColor: Color3?,
 	mainColor: Color3,
-	detail: string?
+	note: string?
 )
-	local tooltip = if detail
-		then `{detail}\n\n> Click to show or hide.`
-		else `**{title} shortcuts.**\n\n> Click to show or hide.`
-
-	return Rows.collapsible(layoutOrder, id, title, tooltip, {
+	local body: { [string]: unknown } = {
 		Table = entryTable(1, entries, mainColor),
-	}, icon, iconColor)
+	}
+
+	if note then
+		body.Note = Rows.paragraph(2, note, "dimmed")
+	end
+
+	return Rows.collapsible(layoutOrder, id, title, nil, body, icon, iconColor)
 end
 
 local function keysTab(theme: StudioTheme)
@@ -355,7 +389,7 @@ local function keysTab(theme: StudioTheme)
 			Icons.Raise,
 			Accent.tool("Raise", theme),
 			mainColor,
-			"`Ctrl + Click` is for `Raise To`; in `From: World` it reads any visible part. Click the sky with `Alt + Right Click` to reset to `Up (Y)`."
+			"Ctrl + Click is for Raise\u{00A0}To (reads any visible part in From: World). Alt + Right Click sky resets to Up (Y)."
 		),
 
 		Material = keyGroup(
@@ -366,7 +400,7 @@ local function keysTab(theme: StudioTheme)
 			Icons.Material,
 			Accent.tool("Material", theme),
 			mainColor,
-			"`Ctrl` swaps `Paint` and `Erase` while held."
+			"Ctrl swaps Paint and Erase while held."
 		),
 
 		Mesh = keyGroup(
@@ -377,11 +411,11 @@ local function keysTab(theme: StudioTheme)
 			Icons.Mesh,
 			Accent.tool("Mesh", theme),
 			mainColor,
-			"`Click`, `Enter` and `X` apply in `Simplify` mode."
+			"Click, Enter, and X apply in Simplify mode."
 		),
 
 		Pick = keyGroup(6, "help-pick", "Pick faces", PICK_KEYS, Icons.PickFaces, nil, mainColor),
-		Stitch = keyGroup(7, "help-stitch", "Stitch", STITCH_KEYS, Icons.Stitch, nil, mainColor, "Distance is `Reach`."),
+		Stitch = keyGroup(7, "help-stitch", "Stitch", STITCH_KEYS, Icons.Stitch, nil, mainColor, "Max snap distance is Reach."),
 
 		Points = keyGroup(
 			8,
@@ -391,13 +425,13 @@ local function keysTab(theme: StudioTheme)
 			Icons.EditPoints,
 			nil,
 			mainColor,
-			"Use Studio's `Move`, `Rotate` and `Scale`. Tile corners always stay. Each drag is one undo step."
+			"Use Studio's Move, Rotate, and Scale. Tile corners always stay; each drag is one undo step."
 		),
 
 		CustomHeading = Rows.section(9, "Custom shortcuts"),
 		Custom = Rows.paragraph(
 			10,
-			"Bind any tool or Edit points in File > Advanced > Customize Shortcuts. Search for Strata.",
+			"Bind any tool, Edit\u{00A0}points, or panel toggle in File > Advanced > Customize\u{00A0}Shortcuts. Search for Strata.",
 			"dimmed"
 		),
 	}
@@ -405,38 +439,70 @@ end
 
 local function aboutTab()
 	return {
-		StrataHeading = Rows.section(1, "Strata", true),
-		Version = Rows.value(2, "Version", Version, nil, "**Installed plugin version.**"),
+		-- At least the visible body height so the footer rests at the bottom; grows and scrolls
+		-- normally when the window is short.
+		Body = e("Frame", {
+			LayoutOrder = 1,
+			Size = UDim2.fromScale(1, 1),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			BackgroundTransparency = 1,
+		}, {
+			Layout = e("UIListLayout", {
+				SortOrder = Enum.SortOrder.LayoutOrder,
+				Padding = UDim.new(0, 8),
+				VerticalFlex = Enum.UIFlexAlignment.SpaceBetween,
+			}),
 
-		License = Rows.value(
-			3,
-			"License",
-			"GPL-3.0",
-			nil,
-			"**GNU General Public License v3 or later.**\n\nFree to use, modify and share under the same license."
-		),
+			Info = e("Frame", {
+				LayoutOrder = 1,
+				Size = UDim2.fromScale(1, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, {
+				Layout = e("UIListLayout", {
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 4),
+				}),
 
-		Source = Rows.property(
-			4,
-			"Source",
-			e(CopyField, { text = SOURCE_URL }),
-			"**Source code.** Click to select, then press `Ctrl + C`."
-		),
+				StrataHeading = Rows.section(1, "Strata", true),
+				Version = Rows.value(2, "Version", Version),
+				License = Rows.value(3, "License", "GPL-3.0-or-later"),
+				Source = Rows.property(4, "Source", e(CopyField, { text = SOURCE_URL })),
+				AuthorHeading = Rows.section(5, "Author"),
+				Author = e(AuthorRow, { LayoutOrder = 6 }),
+			}),
 
-		BetaNote = Rows.paragraph(5, "Beta build: back up places before updating.", "dimmed"),
-		AuthorHeading = Rows.section(6, "Author"),
-		Author = e(AuthorRow, { LayoutOrder = 7 }),
+			Footer = e("Frame", {
+				LayoutOrder = 2,
+				Size = UDim2.fromScale(1, 0),
+				AutomaticSize = Enum.AutomaticSize.Y,
+				BackgroundTransparency = 1,
+			}, {
+				Layout = e("UIListLayout", {
+					SortOrder = Enum.SortOrder.LayoutOrder,
+					Padding = UDim.new(0, 6),
+				}),
+
+				Divider = Rows.divider(1),
+				Note = e(BetaNotice, { LayoutOrder = 2 }),
+			}),
+		}),
 	}
 end
 
-local function HelpPage()
+local function HelpPage(props: { settings: Settings.State })
 	local theme = StudioComponents.useTheme()
 	local tab, setTab = React.useState(lastTab)
+	local active = Settings.activeTool(props.settings)
+	local backTip = if active
+		then `**Back to {Settings.toolLabel(active)}** (\`Esc\`).`
+		elseif props.settings.editingPoints then "**Back to Edit points** (`Esc`)."
+		else "**Back** (`Esc`)."
 	local content = if tab == "guide" then guideTab(theme) elseif tab == "keys" then keysTab(theme) else aboutTab()
 
 	return Rows.overlay("Help", function ()
 		Settings.setOverlay("none")
-	end, "**Close help** (`Esc`).", TABS, tab, function (nextTab: Tab)
+	end, backTip, TABS, tab, function (nextTab: Tab)
 		lastTab = nextTab
 		setTab(nextTab)
 	end, content)

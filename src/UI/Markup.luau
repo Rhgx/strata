@@ -20,6 +20,7 @@ local Markup = {}
 -- Font size in pixels used for blank-line paragraph spacers.
 local GAP_SIZE = 6
 local DIM_TRANSPARENCY = 0.35
+local NBSP = "\u{00A0}"
 
 local function escape(text: string): string
 	return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
@@ -27,7 +28,10 @@ end
 
 local function inline(text: string): string
 	text = text:gsub("%*%*(.-)%*%*", "<b>%1</b>")
-	text = text:gsub("`(.-)`", "<b>%1</b>")
+	-- Keep key combos and UI labels (`Ctrl + C`, `Raise To`) intact so they never split across lines.
+	text = text:gsub("`(.-)`", function (code: string)
+		return `<b>{(code:gsub(" ", NBSP))}</b>`
+	end)
 	text = text:gsub("%*(.-)%*", "<i>%1</i>")
 
 	return text

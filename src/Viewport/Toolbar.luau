@@ -3,8 +3,9 @@
 -- SPDX-License-Identifier: GPL-3.0-or-later
 --[[
 	Manages Strata's Plugins ribbon buttons and Studio PluginActions: always creates the Strata
-	panel toggle button, registers bindable PluginActions for all 8 tools and Edit points (File >
-	Customize Shortcuts), and optionally creates a "Strata Tools" ribbon group when `ribbonTools` is enabled.
+	panel toggle button, registers bindable PluginActions for toggling the panel, all 8 tools, and
+	Edit points (File > Customize Shortcuts), and optionally creates a "Strata Tools" ribbon group
+	when `ribbonTools` is enabled.
 
 	Studio does not support removing ribbon buttons at runtime (destroying a toolbar has no
 	effect, and recreating a button with the same ID errors). Optional tool buttons are therefore
@@ -83,6 +84,22 @@ return function (plugin: Plugin, widget: DockWidgetPluginGui): () -> ()
 		widget.Enabled = true
 		Settings.toggleTool(tool)
 	end
+
+	-- Ribbon buttons cannot be bound in Customize Shortcuts, so expose a matching PluginAction.
+	local togglePanel = plugin:CreatePluginAction(
+		"StrataTogglePanel",
+		"Strata: Toggle panel",
+		"Open or close the Strata panel",
+		"",
+		true
+	)
+
+	table.insert(
+		connections,
+		togglePanel.Triggered:Connect(function ()
+			widget.Enabled = not widget.Enabled
+		end)
+	)
 
 	for _, tool: Tool in Settings.tools() do
 		local label = Settings.toolLabel(tool)
