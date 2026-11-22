@@ -178,6 +178,31 @@ end
 
 -- Removes painted materials from the selected tiles (back to each tile's own look), as one undo
 -- step. Baked tiles show wedges until baked again. Returns how many tiles changed.
+
+-- The shown triangles to refresh after grid triangles `grid` changed look, each once: wedges
+-- follow the shown triangles, which differ from the grid while points are removed. Then every
+-- shown triangle is refreshed, since a thin one covering no grid triangle takes its look from
+-- the grid triangle under its center.
+local function shownTriangles(disp: Displacement.Displacement, grid: { number }): { number }
+	if Displacement.mesh(disp) then
+		local all = table.create(Displacement.triangleCount(disp))
+		for t = 1, Displacement.triangleCount(disp) do
+			all[t] = t
+		end
+		return all
+	end
+	local seen: { [number]: true } = {}
+	local result: { number } = {}
+	for _, g in grid do
+		local t = Displacement.shownOf(disp, g)
+		if t and not seen[t] then
+			seen[t] = true
+			table.insert(result, t)
+		end
+	end
+	return result
+end
+
 function Appearance.clearPaint(): number
 	local targets: { Opened } = {}
 	for _, opened in Query.selectedTiles() do
@@ -193,13 +218,13 @@ function Appearance.clearPaint(): number
 			local disp = opened.disp
 			local triangles: { number } = {}
 			-- Holes stay deleted: they are not paint.
-			for t, index in disp.triLooks do
+			for g, index in disp.triLooks do
 				if index > 0 then
-					disp.triLooks[t] = 0
-					table.insert(triangles, t)
+					disp.triLooks[g] = 0
+					table.insert(triangles, g)
 				end
 			end
-			Session.updateLooks(opened, triangles)
+			Session.updateLooks(opened, shownTriangles(disp, triangles))
 			TerrainInstance.save(opened)
 		end
 		Recording.autoBake()
@@ -223,13 +248,13 @@ function Appearance.restoreHoles(): number
 		for _, opened in targets do
 			local disp = opened.disp
 			local triangles: { number } = {}
-			for t, index in disp.triLooks do
+			for g, index in disp.triLooks do
 				if index == Displacement.HOLE then
-					disp.triLooks[t] = 0
-					table.insert(triangles, t)
+					disp.triLooks[g] = 0
+					table.insert(triangles, g)
 				end
 			end
-			Session.updateLooks(opened, triangles)
+			Session.updateLooks(opened, shownTriangles(disp, triangles))
 			TerrainInstance.save(opened)
 		end
 		Recording.autoBake()

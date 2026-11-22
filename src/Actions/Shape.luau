@@ -42,13 +42,54 @@ local function remapPins(pins: Stitch.Moves, before: { [Opened]: Displacement.Di
 		for v, target in targets do
 			byPoint[pointKey(Displacement.flatPosition(old, v))] = target
 		end
+		-- Raising the power adds points between the old edge points (several levels at once add
+		-- several). Lowering adds none, and an old point that was not pinned stays free.
+		local raised = opened.disp.power > old.power
+		local oldPoints: { [string]: true } = {}
+		if raised then
+			for _, oldEdge in Displacement.edges(old) do
+				for _, v in oldEdge.indices do
+					oldPoints[pointKey(Displacement.flatPosition(old, v))] = true
+				end
+			end
+		end
 		local remapped: { [number]: Vector3 } = {}
 		for _, edge in Displacement.edges(opened.disp) do
-			for _, v in edge.indices do
+			local indices = edge.indices
+			for _, v in indices do
 				local target = byPoint[pointKey(Displacement.flatPosition(opened.disp, v))]
 				if target then
 					remapped[v] = target
 				end
+			end
+			if not raised then
+				continue
+			end
+			-- Pin each run of new points between two pinned points along the line between their
+			-- pins (where the old edge was straight), so they stay on the part edge instead of
+			-- sagging.
+			local lastPinned: number? = nil
+			for i, v in indices do
+				if not remapped[v] then
+					continue
+				end
+				local from = lastPinned
+				if from and i - from > 1 then
+					local allNew = true
+					for j = from + 1, i - 1 do
+						if oldPoints[pointKey(Displacement.flatPosition(opened.disp, indices[j]))] then
+							allNew = false
+							break
+						end
+					end
+					if allNew then
+						local a, b = remapped[indices[from]], remapped[v]
+						for j = from + 1, i - 1 do
+							remapped[indices[j]] = a:Lerp(b, (j - from) / (i - from))
+						end
+					end
+				end
+				lastPinned = i
 			end
 		end
 		result[opened] = remapped
@@ -69,6 +110,8 @@ function Shape.setDetail(power: number): number
 			if opened.disp.power == power then
 				continue
 			end
+			-- Keep looks changed with Studio's own tools before the union goes.
+			TerrainInstance.adoptAppearance(opened)
 			TerrainInstance.removeSurfaces(opened.model)
 			before[opened] = opened.disp
 			opened.disp = Displacement.changePower(opened.disp, power)
@@ -124,17 +167,25 @@ function Shape.addNoise(min: number, max: number): number
 	end
 	local count = 0
 	Recording.run("Strata noise", function()
-		local pins = if Settings.get().stitchParts then Edges.pinsFor(targets) else {}
+		local settings = Settings.get()
+		local pins = if settings.stitchParts then Edges.pinsFor(targets) else {}
+		local changedTiles: { Opened } = {}
 		for _, opened in targets do
 			local changed = Noise.apply(opened, min, max)
 			if next(changed) ~= nil then
 				Session.updateWedges(opened, changed)
 				TerrainInstance.save(opened)
+				table.insert(changedTiles, opened)
 				count += 1
 			end
 		end
-		for _, opened in Edges.restorePins(pins) do
-			TerrainInstance.save(opened)
+		-- Each tile gets its own noise, so seams open; sew them like other edits do.
+		if settings.autosew then
+			Edges.autosew(changedTiles, pins)
+		else
+			for _, opened in Edges.restorePins(pins) do
+				TerrainInstance.save(opened)
+			end
 		end
 		Recording.autoBake()
 	end)
@@ -165,6 +216,8 @@ function Shape.split(): (number, number)
 			local model = opened.model
 			local pivot = model:GetPivot()
 			local parent = model.Parent
+			-- The quarters take the tile's look, including changes made with Studio's tools.
+			TerrainInstance.adoptAppearance(opened)
 			if not parent then
 				continue
 			end
@@ -179,7 +232,8 @@ function Shape.split(): (number, number)
 			end
 			for _, quarter in Displacement.split(opened.disp) do
 				-- A quarter with every triangle deleted would be an invisible tile.
-				if Displacement.holeCount(quarter.disp) == Displacement.triangleCount(quarter.disp) then
+				-- Both counted on the grid: the shown triangles differ while points are removed.
+				if Displacement.holeCount(quarter.disp) == Displacement.gridTriangleCount(quarter.disp) then
 					continue
 				end
 				local child = TerrainInstance.create(

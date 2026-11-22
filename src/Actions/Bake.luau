@@ -110,12 +110,19 @@ function Bake.bakeEdited()
 	-- Always finish the recording, even if something unexpected fails mid-bake, so Studio's undo
 	-- history is never left open.
 	local ok, result = pcall(Session.bakeDirty, Settings.get().smoothingAngle)
+	-- Nothing baked or failed (for example everything was undone first): cancel, so no empty
+	-- "Strata bake" step lands in the undo history.
+	local changed = ok and (result.baked > 0 or result.failed > 0)
 	ChangeHistoryService:FinishRecording(
 		recording,
-		if ok then Enum.FinishRecordingOperation.Commit else Enum.FinishRecordingOperation.Cancel
+		if changed then Enum.FinishRecordingOperation.Commit else Enum.FinishRecordingOperation.Cancel
 	)
-	if not ok then
+	if not changed then
+		-- Cancel undoes anything opening tiles created (such as a missing Tris folder), so the
+		-- opened copies may point at removed instances.
 		Session.clear()
+	end
+	if not ok then
 		Status.post("error", `Bake failed: {result}`)
 		return
 	end

@@ -120,7 +120,8 @@ function SurfaceRay.cast(
 		local disp = snapshot.opened.disp
 		local world = snapshot.world
 		for t = 1, Displacement.triangleCount(disp) do
-			if not includeHoles and disp.triLooks[t] == Displacement.HOLE then
+			-- `t` is a shown triangle, which differs from the grid while points are removed.
+			if not includeHoles and Displacement.isHole(disp, t) then
 				continue
 			end
 			local i1, i2, i3 = Displacement.triangle(disp, t)
