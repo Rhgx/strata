@@ -8,7 +8,9 @@
 	Per-tile matching algorithm:
 	1. Drop interior edges. When two parts meet along a shared edge (road halves, paired wedges,
 	   adjacent floor panels), that edge lies inside the combined surface rather than on its
-	   border. Parts joined this way form a single group matched as one outline.
+	   border. Only the shared stretch is dropped, so a wall butting into the middle of a longer
+	   one leaves the rest of the longer edge in place. Parts joined this way form a single group
+	   matched as one outline.
 	2. Filter candidate part edges by facing: the part's side face along the edge must face back
 	   toward the tile edge (within ~75 degrees in the tile's flat plane). This selects the near
 	   edge of a road or wall while ignoring far edges and end caps at any reach, while still
@@ -25,6 +27,12 @@
 	5. Resolve conflicts per vertex: within one part, edges bordering a face oriented like the
 	   tile win (road top beats bottom, ramp slope beats base), then closest distance; across
 	   parts, closest distance wins.
+	6. Close corners. A tile corner lies on two tile edges, and each can be matched to a different
+	   part edge (two walls meeting at an inside corner). Projecting the corner onto only one of
+	   them leaves it short of the other, opening a triangular gap, so a point matched to two
+	   non-parallel part edges moves to where those edges cross instead. Coincident vertices of
+	   other tiles (a neighbor's corner or a 2:1 midpoint) join the same decision, so a seam
+	   through the corner stays closed.
 
 	Stitched vertices are not sewn afterwards, because averaging a snapped corner with an
 	unsnapped neighbor would pull it off the part. Instead, `propagate` copies target positions to
@@ -104,6 +112,17 @@ type Tile = {
 	current: { [number]: Vector3 },
 }
 
+-- One candidate's hit on a vertex.
+type Entry = { hit: Hit, candidate: Candidate }
+
+-- A matched vertex with the winning entry from each tile edge it lies on (two at a tile corner).
+type Claimed = {
+	tile: Tile,
+	v: number,
+	moves: { [number]: Vector3 },
+	claims: { Entry },
+}
+
 -- Minimum inward dot product (~75 degrees) for a part's side face to face back at a tile edge.
 local OUTWARD_DOT = 0.25
 -- Part edges with less than this fraction of their length in the tile plane are nearly vertical and skipped.
@@ -122,6 +141,11 @@ local SAME = 1e-4
 -- Flat-position tolerance for matching neighbor vertices, matching Sew (1 Hammer unit per axis).
 local TOLERANCE = Units.studs(1)
 local MAX_INTERPOLATED_RUN = 3
+-- Part edges closer than this sine of an angle to parallel (~6 degrees) cross too far away or too
+-- unstably to form a corner.
+local MIN_CORNER_SINE = 0.1
+-- Height slack when checking which part face a corner can sit against.
+local CORNER_HEIGHT_SLACK = 1e-3
 
 local Stitch = {}
 
@@ -193,14 +217,6 @@ local function inPlane(vector: Vector3, normal: Vector3): Vector3
 	return vector - normal * vector:Dot(normal)
 end
 
-local function distanceToSegment(point: Vector3, a: Vector3, b: Vector3): number
-	local ab = b - a
-	local length2 = ab:Dot(ab)
-	local t = if length2 > 0 then math.clamp((point - a):Dot(ab) / length2, 0, 1) else 0
-
-	return (point - (a + ab * t)).Magnitude
-end
-
 -- Checks whether two edges share an aligned top or bottom cap face relative to `normal`
 -- (e.g. two halves of a road or two adjacent floor wedges).
 local function shareCap(x: PartEdge, y: PartEdge, normal: Vector3): boolean
@@ -217,9 +233,46 @@ local function shareCap(x: PartEdge, y: PartEdge, normal: Vector3): boolean
 	return false
 end
 
--- Step 1: marks shared interior edges and unions parts joined across aligned cap faces into
--- groups (keeping walls on roads or corner-touching roads separate).
-local function classify(edges: { PartEdge }, normal: Vector3): ({ [PartEdge]: true }, (BasePart) -> BasePart)
+-- Returns the pieces of `edge` left uncovered by `covered` (parameter ranges along it), dropping
+-- slivers no longer than rounding. An uncovered edge is returned as itself.
+local function uncoveredPieces(edge: PartEdge, covered: { { number } }?): { PartEdge }
+	if not covered then
+		return { edge }
+	end
+
+	table.sort(covered, function (x: { number }, y: { number })
+		return x[1] < y[1]
+	end)
+
+	local ab = edge.b - edge.a
+	local sliver = 2 * COINCIDENT / ab.Magnitude
+	local pieces: { PartEdge } = {}
+	local from = 0
+
+	local function piece(t0: number, t1: number)
+		if t1 - t0 <= sliver then
+			return
+		end
+
+		local a, b = edge.a + ab * t0, edge.a + ab * t1
+		table.insert(pieces, { part = edge.part, a = a, b = b, n1 = edge.n1, n2 = edge.n2, min = a:Min(b), max = a:Max(b) })
+	end
+
+	for _, range in covered do
+		piece(from, range[1])
+		from = math.max(from, range[2])
+	end
+
+	piece(from, 1)
+
+	return pieces
+end
+
+-- Step 1: removes the stretches of edges shared with another part (including part of a longer
+-- edge, like a wall butting into the middle of another) and unions parts joined across aligned
+-- cap faces into groups (keeping walls on roads or corner-touching roads separate). Returns the
+-- remaining boundary edges.
+local function classify(edges: { PartEdge }, normal: Vector3): ({ PartEdge }, (BasePart) -> BasePart)
 	local parent: { [BasePart]: BasePart } = {}
 
 	local function find(part: BasePart): BasePart
@@ -232,12 +285,43 @@ local function classify(edges: { PartEdge }, normal: Vector3): ({ [PartEdge]: tr
 		return root
 	end
 
-	local interior: { [PartEdge]: true } = {}
+	local covered: { [PartEdge]: { { number } } } = {}
+
+	-- Records the stretch of `x` that `y` lies along, when they share one line. Returns whether
+	-- the overlap is longer than rounding.
+	local function cover(x: PartEdge, y: PartEdge): boolean
+		local ab = x.b - x.a
+		local length2 = ab:Dot(ab)
+
+		for _, point in { y.a, y.b } do
+			local t = (point - x.a):Dot(ab) / length2
+
+			if (point - (x.a + ab * t)).Magnitude > COINCIDENT then
+				return false
+			end
+		end
+
+		local ta, tb = (y.a - x.a):Dot(ab) / length2, (y.b - x.a):Dot(ab) / length2
+		local t0, t1 = math.max(math.min(ta, tb), 0), math.min(math.max(ta, tb), 1)
+
+		if (t1 - t0) * math.sqrt(length2) <= COINCIDENT then
+			return false
+		end
+
+		local list = covered[x]
+
+		if not list then
+			list = {}
+			covered[x] = list
+		end
+
+		table.insert(list, { t0, t1 })
+		return true
+	end
 
 	for i = 1, #edges do
 		local x = edges[i]
 		local xDirection = (x.b - x.a).Unit
-		local xMid = (x.a + x.b) / 2
 
 		for j = i + 1, #edges do
 			local y = edges[j]
@@ -262,18 +346,10 @@ local function classify(edges: { PartEdge }, normal: Vector3): ({ [PartEdge]: tr
 				continue
 			end
 
-			local xInside = distanceToSegment(xMid, y.a, y.b) <= COINCIDENT
-			local yInside = distanceToSegment((y.a + y.b) / 2, x.a, x.b) <= COINCIDENT
+			local shared = cover(x, y)
+			cover(y, x)
 
-			if xInside then
-				interior[x] = true
-			end
-
-			if yInside then
-				interior[y] = true
-			end
-
-			if xInside or yInside then
+			if shared then
 				local rx, ry = find(x.part), find(y.part)
 
 				if rx ~= ry then
@@ -283,7 +359,14 @@ local function classify(edges: { PartEdge }, normal: Vector3): ({ [PartEdge]: tr
 		end
 	end
 
-	return interior, find
+	local boundary: { PartEdge } = {}
+
+	for _, edge in edges do
+		local pieces = uncoveredPieces(edge, covered[edge])
+		table.move(pieces, 1, #pieces, #boundary + 1, boundary)
+	end
+
+	return boundary, find
 end
 
 -- Returns all parts in `pool` (including `part`) connected to `part` via shared cap edges, so
@@ -540,6 +623,168 @@ local function betterInPart(a: Hit, aCandidate: Candidate, b: Hit, bCandidate: C
 	return a.distance < b.distance
 end
 
+local function samePoint(a: Vector3, b: Vector3): boolean
+	return math.abs(a.X - b.X) <= TOLERANCE and math.abs(a.Y - b.Y) <= TOLERANCE and math.abs(a.Z - b.Z) <= TOLERANCE
+end
+
+-- Whether a point `above` studs over `edge` (along the tile normal) still touches the part: a top
+-- edge's side face runs down from it and a bottom edge's runs up, so a corner sits against the
+-- part only on that side.
+local function againstPart(edge: PartEdge, normal: Vector3, above: number): boolean
+	local cap = if math.abs(edge.n1:Dot(normal)) < math.abs(edge.n2:Dot(normal)) then edge.n2 else edge.n1
+	local capDot = cap:Dot(normal)
+
+	if capDot > FACING_DOT then
+		return above <= CORNER_HEIGHT_SLACK
+	elseif capDot < -FACING_DOT then
+		return above >= -CORNER_HEIGHT_SLACK
+	end
+
+	return math.abs(above) <= CORNER_HEIGHT_SLACK
+end
+
+-- Where part edges `x` and `y` cross in the tile plane, or nil when they are nearly parallel. The
+-- two edges can pass at different heights there; the higher point is kept when it still touches
+-- the lower part's side face (two walls standing on uneven ground), the lower when that one
+-- touches (two floors at different heights), so no slot opens under or beside either part.
+local function crossing(x: PartEdge, y: PartEdge, normal: Vector3): Vector3?
+	local xab, yab = x.b - x.a, y.b - y.a
+	local dx, dy = inPlane(xab, normal), inPlane(yab, normal)
+	local denominator = dx:Cross(dy):Dot(normal)
+
+	if math.abs(denominator) < MIN_CORNER_SINE * dx.Magnitude * dy.Magnitude then
+		return nil
+	end
+
+	local w = inPlane(y.a - x.a, normal)
+	local p = x.a + xab * (w:Cross(dy):Dot(normal) / denominator)
+	local q = y.a + yab * (w:Cross(dx):Dot(normal) / denominator)
+	local rise = (p - q):Dot(normal)
+
+	if againstPart(y, normal, rise) then
+		return p
+	elseif againstPart(x, normal, -rise) then
+		return q
+	end
+
+	return (p + q) / 2
+end
+
+-- Step 6: moves points claimed by two non-parallel part edges onto their crossing. Every tile's
+-- vertex at the same flat point (within TOLERANCE, as in Sew) is decided together from the part
+-- edges claimed by any of them, and moves only if the crossing is within reach of each.
+local function closeCorners(claimed: { Claimed }, reach: number, extend: boolean)
+	local cells: { [string]: { Claimed } } = {}
+
+	local function cellOf(point: Vector3): (number, number, number)
+		return math.floor(point.X), math.floor(point.Y), math.floor(point.Z)
+	end
+
+	for _, record in claimed do
+		local x, y, z = cellOf(flatOf(record.tile, record.v))
+		local key = `{x},{y},{z}`
+		local list = cells[key]
+
+		if not list then
+			list = {}
+			cells[key] = list
+		end
+
+		table.insert(list, record)
+	end
+
+	local visited: { [Claimed]: true } = {}
+
+	for _, record in claimed do
+		if visited[record] then
+			continue
+		end
+
+		local flat = flatOf(record.tile, record.v)
+		local x, y, z = cellOf(flat)
+		local group: { Claimed } = {}
+
+		for dx = -1, 1 do
+			for dy = -1, 1 do
+				for dz = -1, 1 do
+					local list = cells[`{x + dx},{y + dy},{z + dz}`]
+
+					if not list then
+						continue
+					end
+
+					for _, other in list do
+						if not visited[other] and samePoint(flat, flatOf(other.tile, other.v)) then
+							visited[other] = true
+							table.insert(group, other)
+						end
+					end
+				end
+			end
+		end
+
+		local claims: { Entry } = {}
+		local seen: { [PartEdge]: true } = {}
+
+		for _, member in group do
+			for _, entry in member.claims do
+				if not seen[entry.candidate.edge] then
+					seen[entry.candidate.edge] = true
+					table.insert(claims, entry)
+				end
+			end
+		end
+
+		if #claims < 2 then
+			continue
+		end
+
+		local normal = record.tile.normal
+		local current = currentOf(record.tile, record.v)
+		local best: Vector3? = nil
+
+		for i = 1, #claims - 1 do
+			for j = i + 1, #claims do
+				local target = crossing(claims[i].candidate.edge, claims[j].candidate.edge, normal)
+
+				if not target or (best and (target - current).Magnitude >= (best - current).Magnitude) then
+					continue
+				end
+
+				local reachable = true
+
+				for _, member in group do
+					local offset = target - currentOf(member.tile, member.v)
+
+					if offset.Magnitude > reach and not (extend and inPlane(offset, member.tile.normal).Magnitude <= reach) then
+						reachable = false
+						break
+					end
+				end
+
+				if reachable then
+					best = target
+				end
+			end
+		end
+
+		if not best then
+			continue
+		end
+
+		for _, member in group do
+			member.moves[member.v] = best
+
+			-- List the corner under every edge that claimed it so previews draw both spans to it.
+			for _, entry in member.claims do
+				if not table.find(entry.candidate.won, entry.hit) then
+					table.insert(entry.candidate.won, entry.hit)
+				end
+			end
+		end
+	end
+end
+
 -- Computes target moves snapping edges of `tiles` onto `parts` within `reach` studs without
 -- mutating any tiles. Pass the returned moves to `Stitch.propagate` and `Stitch.write`.
 function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, extend: boolean): Result
@@ -549,6 +794,9 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 	if #all == 0 then
 		return result
 	end
+
+	local claimed: { Claimed } = {}
+	local matched: { { opened: Opened, candidates: { Candidate } } } = {}
 
 	for _, opened in tiles do
 		local tile = buildTile(opened)
@@ -566,15 +814,7 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 			continue
 		end
 
-		local interior, groupOf = classify(nearby, tile.normal)
-		local boundary: { PartEdge } = {}
-
-		for _, edge in nearby do
-			if not interior[edge] then
-				table.insert(boundary, edge)
-			end
-		end
-
+		local boundary, groupOf = classify(nearby, tile.normal)
 		local candidates: { Candidate } = {}
 
 		for tileEdge, edge in Displacement.edges(opened.disp) do
@@ -583,24 +823,40 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 		end
 
 		-- Select the best hit per part for each vertex (including corners shared by two edges),
-		-- then pick the closest part overall.
-		type Entry = { hit: Hit, candidate: Candidate }
+		-- then pick the closest part overall. The same choice per tile edge gives each vertex's
+		-- claims for step 6.
 		local perPart: { [number]: { [BasePart]: Entry } } = {}
+		local perEdge: { [number]: { [number]: { [BasePart]: Entry } } } = {}
+
+		local function keep(byPart: { [BasePart]: Entry }, hit: Hit, candidate: Candidate)
+			local current = byPart[candidate.edge.part]
+
+			if not current or betterInPart(hit, candidate, current.hit, current.candidate) then
+				byPart[candidate.edge.part] = { hit = hit, candidate = candidate }
+			end
+		end
 
 		for _, candidate in candidates do
 			for _, hit in candidate.hits do
 				local byPart = perPart[hit.vertex]
+				local byEdge = perEdge[hit.vertex]
 
 				if not byPart then
 					byPart = {}
 					perPart[hit.vertex] = byPart
+					byEdge = {}
+					perEdge[hit.vertex] = byEdge
 				end
 
-				local current = byPart[candidate.edge.part]
+				local edgeParts = byEdge[candidate.tileEdge]
 
-				if not current or betterInPart(hit, candidate, current.hit, current.candidate) then
-					byPart[candidate.edge.part] = { hit = hit, candidate = candidate }
+				if not edgeParts then
+					edgeParts = {}
+					byEdge[candidate.tileEdge] = edgeParts
 				end
+
+				keep(byPart, hit, candidate)
+				keep(edgeParts, hit, candidate)
 			end
 		end
 
@@ -608,9 +864,7 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 			continue
 		end
 
-		local moves: { [number]: Vector3 } = {}
-
-		for v, entries in perPart do
+		local function closest(entries: { [BasePart]: Entry }): Entry
 			local best: Entry? = nil
 
 			for _, entry in entries do
@@ -619,12 +873,33 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 				end
 			end
 
-			local chosen = best :: Entry
+			return best :: Entry
+		end
+
+		local moves: { [number]: Vector3 } = {}
+
+		for v, entries in perPart do
+			local chosen = closest(entries)
 			moves[v] = chosen.hit.target
 			table.insert(chosen.candidate.won, chosen.hit)
+
+			local claims: { Entry } = {}
+
+			for _, edgeParts in perEdge[v] do
+				table.insert(claims, closest(edgeParts))
+			end
+
+			table.insert(claimed, { tile = tile, v = v, moves = moves, claims = claims })
 		end
 
 		result.moves[opened] = moves
+		table.insert(matched, { opened = opened, candidates = candidates })
+	end
+
+	closeCorners(claimed, reach, extend)
+
+	for _, entry in matched do
+		local opened, candidates = entry.opened, entry.candidates
 
 		for _, candidate in candidates do
 			if #candidate.won > 0 then
@@ -649,10 +924,6 @@ function Stitch.match(tiles: { Opened }, parts: { BasePart }, reach: number, ext
 	end
 
 	return result
-end
-
-local function samePoint(a: Vector3, b: Vector3): boolean
-	return math.abs(a.X - b.X) <= TOLERANCE and math.abs(a.Y - b.Y) <= TOLERANCE and math.abs(a.Z - b.Z) <= TOLERANCE
 end
 
 local function flatBounds(tile: Tile): (Vector3, Vector3)
