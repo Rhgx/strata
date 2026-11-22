@@ -8,20 +8,16 @@
 ]]
 
 local Displacement = require(script.Parent.Parent.Core.Displacement)
-local Mesh = require(script.Parent.Parent.Core.Mesh)
+local Simplify = require(script.Parent.Parent.Core.Simplify)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local MeshStage = require(script.Parent.Parent.Scene.MeshStage)
 local Query = require(script.Parent.Parent.Scene.Query)
 local Session = require(script.Parent.Parent.Scene.Session)
+local Settings = require(script.Parent.Parent.State.Settings)
 local Edges = require(script.Parent.Edges)
 local Recording = require(script.Parent.Recording)
 
 type Opened = TerrainInstance.Opened
-
--- Candidates tried between yields, so Studio stays responsive on big selections.
-local CANDIDATES_PER_YIELD = 20
--- A max angle of 0 still allows rounding noise on flat ground.
-local MIN_ANGLE = 0.1
 
 local MeshActions = {}
 
@@ -37,177 +33,36 @@ function MeshActions.finish(tiles: { Opened })
 	end
 end
 
--- Points that must stay so painted borders and hole outlines keep their shape: every point
--- where grid triangles with different looks meet.
-local function pinnedPoints(disp: Displacement.Displacement): { [number]: true }
-	local lookAt: { [number]: number } = {}
-	local pinned: { [number]: true } = {}
-	for g = 1, Displacement.gridTriangleCount(disp) do
-		local look = disp.triLooks[g]
-		for _, v in { Displacement.gridTriangle(disp, g) } do
-			local seen = lookAt[v]
-			if seen == nil then
-				lookAt[v] = look
-			elseif seen ~= look then
-				pinned[v] = true
-			end
-		end
-	end
-	return pinned
-end
-
--- The unit normal of triangle abc, on the side of `up`.
-local function normalOf(a: Vector3, b: Vector3, c: Vector3, up: Vector3): Vector3?
-	local cross = (b - a):Cross(c - a)
-	if cross.Magnitude < 1e-9 then
-		return nil
-	end
-	local n = cross.Unit
-	return if n:Dot(up) < 0 then -n else n
-end
-
 --[[
-	The points of one tile that can be removed while every shown triangle stays within
-	`maxAngle` degrees of the full-detail triangles under it (compared with each original grid
-	triangle, not with its neighbors, so a gentle curve is never flattened step by step).
-	Flattest points are tried first. Points already removed stay removed. Yields.
+	The tiles Select flat and Restore all work on: the selected tiles, or with none selected,
+	every tile (none with Selected only on). The running Mesh tool takes clicks in the 3D view,
+	so selecting first is not always handy.
 ]]
-local function flatPoints(opened: Opened, maxAngle: number): { [number]: true }
-	local disp = opened.disp
-	local up = Displacement.faceNormal(disp)
-	Displacement.reproject(disp, up)
-	local positions = Displacement.positions(disp, up)
-	local size = disp.size
-	local cosLimit = math.cos(math.rad(math.max(maxAngle, MIN_ANGLE)))
-
-	local gridNormals: { [number]: Vector3 } = {}
-	local touching: { [number]: { number } } = {}
-	for g = 1, Displacement.gridTriangleCount(disp) do
-		local a, b, c = Displacement.gridTriangle(disp, g)
-		local n = normalOf(positions[a], positions[b], positions[c], up)
-		if n then
-			gridNormals[g] = n
-		end
-		for _, v in { a, b, c } do
-			local list = touching[v]
-			if list then
-				table.insert(list, g)
-			else
-				touching[v] = { g }
-			end
-		end
+function MeshActions.scope(): { Opened }
+	local selected = Query.selectedTiles()
+	if #selected > 0 or Settings.get().paintSelectedOnly then
+		return selected
 	end
-
-	local pinned = pinnedPoints(disp)
-	type Candidate = { v: number, bend: number }
-	local candidates: { Candidate } = {}
-	for v = 1, size * size do
-		if disp.removed[v] or pinned[v] or Displacement.isCorner(disp, v) then
-			continue
-		end
-		-- How much the grid bends at this point: the widest angle between its triangles.
-		local lowest = 1
-		local list = touching[v] or {}
-		for i = 1, #list do
-			local ni = gridNormals[list[i]]
-			for j = i + 1, #list do
-				local nj = gridNormals[list[j]]
-				if ni and nj then
-					lowest = math.min(lowest, ni:Dot(nj))
-				end
-			end
-		end
-		table.insert(candidates, { v = v, bend = -lowest })
-	end
-	table.sort(candidates, function(x: Candidate, y: Candidate)
-		if x.bend ~= y.bend then
-			return x.bend < y.bend
-		end
-		return x.v < y.v
-	end)
-
-	local c = disp.corners
-	local n = size - 1
-	local rowStep, colStep = (c[2] - c[1]).Magnitude / n, (c[4] - c[1]).Magnitude / n
-	local removed = table.clone(disp.removed)
-	local result: { [number]: true } = {}
-	-- Triangles of the current result, by sorted vertex triple. Only triangles a removal creates
-	-- are checked, so a big triangle that was already there (from earlier, manual removals)
-	-- never blocks every other point.
-	local function key(tri: { number }): string
-		local a, b, c3 = tri[1], tri[2], tri[3]
-		if a > b then
-			a, b = b, a
-		end
-		if b > c3 then
-			b, c3 = c3, b
-		end
-		if a > b then
-			a, b = b, a
-		end
-		return `{a},{b},{c3}`
-	end
-	local existing: { [string]: true } = {}
-	local start = Displacement.mesh(disp)
-	if start then
-		for _, tri in start.triangles do
-			existing[key(tri)] = true
-		end
-	else
-		for g = 1, Displacement.gridTriangleCount(disp) do
-			existing[key({ Displacement.gridTriangle(disp, g) })] = true
-		end
-	end
-	for i, candidate in candidates do
-		removed[candidate.v] = true
-		local mesh = Mesh.build(size, removed, rowStep, colStep)
-		local fits = true
-		for t, tri in mesh.triangles do
-			if existing[key(tri)] then
-				continue
-			end
-			local shown = normalOf(positions[tri[1]], positions[tri[2]], positions[tri[3]], up)
-			if not shown then
-				continue
-			end
-			for _, g in mesh.cover[t] do
-				local original = gridNormals[g]
-				if original and original:Dot(shown) < cosLimit then
-					fits = false
-					break
-				end
-			end
-			if not fits then
-				break
-			end
-		end
-		if fits then
-			result[candidate.v] = true
-			table.clear(existing)
-			for _, tri in mesh.triangles do
-				existing[key(tri)] = true
-			end
-		else
-			removed[candidate.v] = nil
-		end
-		if i % CANDIDATES_PER_YIELD == 0 then
-			task.wait()
-		end
-	end
-	return result
+	return Session.getAll(Session.models())
 end
 
 --[[
-	Marks the points of the selected tiles that can go within `maxAngle` degrees (replacing their
+	Marks the points of the tiles in scope that can go within `maxAngle` degrees (replacing their
 	earlier marks), so the result can be previewed before Apply. Returns how many tiles got marks
-	and how many points were marked. Yields.
+	and how many points were marked. Yields; stops early (keeping no stale marks) if the Mesh
+	tool stops or leaves Simplify meanwhile, since that clears the marks.
 ]]
 function MeshActions.selectFlat(maxAngle: number): (number, number)
 	local tiles, points = 0, 0
-	for _, opened in Query.selectedTiles() do
+	for _, opened in MeshActions.scope() do
+		local found = Simplify.flatPoints(opened.disp, maxAngle)
+		local settings = Settings.get()
+		if not (settings.meshing and settings.meshMode == "Simplify") then
+			return 0, 0
+		end
 		local marks: { [number]: MeshStage.Mark } = {}
 		local count = 0
-		for v in flatPoints(opened, maxAngle) do
+		for v in found do
 			marks[v] = "remove"
 			count += 1
 		end
@@ -220,10 +75,10 @@ function MeshActions.selectFlat(maxAngle: number): (number, number)
 	return tiles, points
 end
 
--- Marks every removed point of the selected tiles to come back. Returns how many tiles.
+-- Marks every removed point of the tiles in scope to come back. Returns how many tiles.
 function MeshActions.markRestoreAll(): number
 	local tiles = 0
-	for _, opened in Query.selectedTiles() do
+	for _, opened in MeshActions.scope() do
 		local marks: { [number]: MeshStage.Mark } = {}
 		for v in opened.disp.removed do
 			marks[v] = "restore"

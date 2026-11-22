@@ -117,6 +117,23 @@ function WedgeBuilder.updateTriangles(
 	return positions
 end
 
+-- Unparented wedges for shown triangles `triangles` of `disp`, for a one-off union (baking a
+-- simplified copy). The caller destroys them.
+function WedgeBuilder.temporary(disp: Displacement.Displacement, pivot: CFrame, triangles: { number }): { BasePart }
+	local outward = Displacement.faceNormal(disp)
+	local positions = Displacement.positions(disp, outward)
+	local parts: { BasePart } = table.create(#triangles * 2)
+	for _, t in triangles do
+		local i1, i2, i3 = Displacement.triangle(disp, t)
+		local w1, w2 = Instance.new("WedgePart"), Instance.new("WedgePart")
+		w1.Anchored, w2.Anchored = true, true
+		placeTriangle(positions[i1], positions[i2], positions[i3], outward, pivot, w1, w2)
+		table.insert(parts, w1)
+		table.insert(parts, w2)
+	end
+	return parts
+end
+
 -- Gives the wedges of `triangles` the look each triangle shows (painted or the tile's own).
 -- Holes keep their wedges, so wedge numbering stays fixed, but hide them: invisible, no
 -- collision, no shadow, and ignored by raycasts and clicks.

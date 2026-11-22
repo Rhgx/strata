@@ -1,10 +1,11 @@
 --!strict
 --[[
 	The latest operation result, shown in the panel's status bar. Success and warning messages
-	expire after a few seconds; errors stay until the next message.
+	expire after a few seconds; errors stay until the next message. Progress messages (a long
+	bake) are replaced by the result when it is done.
 ]]
 
-export type Kind = "success" | "warning" | "error"
+export type Kind = "success" | "warning" | "error" | "progress"
 
 export type Message = {
 	kind: Kind,
@@ -38,13 +39,23 @@ function Status.post(kind: Kind, text: string)
 	local message: Message = { kind = kind, text = text, id = nextId }
 	current = message
 	notify()
-	if kind ~= "error" then
+	-- Progress stays until the result replaces it (see clearProgress); errors until the next
+	-- message.
+	if kind ~= "error" and kind ~= "progress" then
 		task.delay(EXPIRE_SECONDS, function()
 			if current == message then
 				current = nil
 				notify()
 			end
 		end)
+	end
+end
+
+-- Drops a progress message that no result replaced (a bake that ended with nothing to say).
+function Status.clearProgress()
+	if current and current.kind == "progress" then
+		current = nil
+		notify()
 	end
 end
 

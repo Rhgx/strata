@@ -12,6 +12,8 @@ local CollectionService = game:GetService("CollectionService")
 local Displacement = require(script.Parent.Parent.Core.Displacement)
 local TerrainInstance = require(script.Parent.Parent.Core.TerrainInstance)
 local WedgeBuilder = require(script.Parent.Parent.Core.WedgeBuilder)
+local Settings = require(script.Parent.Parent.State.Settings)
+local Status = require(script.Parent.Parent.State.Status)
 
 type Opened = TerrainInstance.Opened
 
@@ -19,6 +21,9 @@ export type BakeResult = {
 	baked: number,
 	failed: number,
 	firstError: string?,
+	-- Triangles the baked tiles show, and how many their baked surfaces have.
+	triangles: number,
+	bakedTriangles: number,
 }
 
 local cache: { [Model]: Opened } = {}
@@ -30,6 +35,18 @@ local dirty: { [Model]: true } = {}
 local baking = false
 
 local Session = {}
+
+function Session.emptyResult(): BakeResult
+	return { baked = 0, failed = 0, firstError = nil, triangles = 0, bakedTriangles = 0 }
+end
+
+-- " (768 to 24 triangles)" when the bake optimizations left out triangles, else "".
+function Session.savings(result: BakeResult): string
+	if result.bakedTriangles >= result.triangles then
+		return ""
+	end
+	return ` ({result.triangles} to {result.bakedTriangles} triangles)`
+end
 
 -- Every displacement model in the workspace.
 function Session.models(): { Model }
@@ -128,22 +145,38 @@ function Session.updateLooks(opened: Opened, triangles: { number }): boolean
 	return rebuilt
 end
 
--- Bakes `targets` into unions. Yields; must run inside a ChangeHistoryService recording.
+-- Bakes `targets` into unions, with the bake optimizations from Settings. Yields; must run
+-- inside a ChangeHistoryService recording.
 function Session.bake(targets: { Opened }, smoothingAngle: number): BakeResult
-	local result: BakeResult = { baked = 0, failed = 0, firstError = nil }
+	local result = Session.emptyResult()
+	local settings = Settings.get()
+	local options: TerrainInstance.BakeOptions = {
+		smoothingAngle = smoothingAngle,
+		simplifyAngle = settings.bakeSimplifyAngle,
+		tolerance = settings.bakeHeightTolerance,
+		simplifyEdges = settings.bakeSimplifyEdges,
+		flatPart = settings.bakeFlatPart,
+		flatNoShadow = settings.bakeFlatNoShadow,
+	}
 	baking = true
 	-- Each tile's bake is protected below, so `baking` is always reset.
-	for _, opened in targets do
+	for i, opened in targets do
 		if not opened.model:IsDescendantOf(workspace) or TerrainInstance.isBaked(opened.model) then
 			dirty[opened.model] = nil
 			continue
 		end
+		-- Unions yield, so the status bar shows how far a long bake has come.
+		if #targets > 1 then
+			Status.post("progress", `Baking {i} of {#targets}...`)
+		end
 		local err = ""
-		local ok = xpcall(TerrainInstance.bake, function(message)
+		local ok, before, after = xpcall(TerrainInstance.bake, function(message)
 			err = tostring(message)
-		end, opened, smoothingAngle)
+		end, opened, options)
 		if ok then
 			result.baked += 1
+			result.triangles += before
+			result.bakedTriangles += after
 			dirty[opened.model] = nil
 		else
 			result.failed += 1
@@ -152,6 +185,7 @@ function Session.bake(targets: { Opened }, smoothingAngle: number): BakeResult
 		end
 	end
 	baking = false
+	Status.clearProgress()
 	return result
 end
 

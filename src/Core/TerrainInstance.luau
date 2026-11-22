@@ -23,6 +23,7 @@ local CollectionService = game:GetService("CollectionService")
 local GeometryService = game:GetService("GeometryService")
 
 local Displacement = require(script.Parent.Displacement)
+local Simplify = require(script.Parent.Simplify)
 local WedgeBuilder = require(script.Parent.WedgeBuilder)
 
 local DATA_NAME = "DispData"
@@ -128,18 +129,24 @@ function TerrainInstance.open(model: Model): Opened
 	}
 end
 
--- The baked union in the tile's own look, if baked and any triangle uses that look.
-function TerrainInstance.surface(model: Model): UnionOperation?
+-- Baked surfaces are unions, or a plain Part for a flat tile baked with "Plain Part for flat
+-- tiles".
+local function isSurfacePart(inst: Instance): boolean
+	return inst:IsA("UnionOperation") or inst:IsA("Part")
+end
+
+-- The baked surface in the tile's own look, if baked and any triangle uses that look.
+function TerrainInstance.surface(model: Model): BasePart?
 	local surface = model:FindFirstChild(SURFACE_NAME)
-	if surface and surface:IsA("UnionOperation") then
+	if surface and isSurfacePart(surface) and surface:IsA("BasePart") then
 		return surface
 	end
 	return nil
 end
 
--- The look number of a baked union (0 for Surface, k for Surface_k), or nil for other children.
+-- The look number of a baked surface (0 for Surface, k for Surface_k), or nil for other children.
 function TerrainInstance.surfaceLook(inst: Instance): number?
-	if not inst:IsA("UnionOperation") then
+	if not isSurfacePart(inst) then
 		return nil
 	end
 	if inst.Name == SURFACE_NAME then
@@ -149,11 +156,11 @@ function TerrainInstance.surfaceLook(inst: Instance): number?
 	return if k then tonumber(k) else nil
 end
 
--- Every baked union of the tile (its own look and each painted look).
-function TerrainInstance.surfaces(model: Model): { UnionOperation }
-	local result: { UnionOperation } = {}
+-- Every baked surface of the tile (its own look and each painted look).
+function TerrainInstance.surfaces(model: Model): { BasePart }
+	local result: { BasePart } = {}
 	for _, child in model:GetChildren() do
-		if child:IsA("UnionOperation") and TerrainInstance.surfaceLook(child) ~= nil then
+		if child:IsA("BasePart") and TerrainInstance.surfaceLook(child) ~= nil then
 			table.insert(result, child)
 		end
 	end
@@ -164,7 +171,7 @@ function TerrainInstance.isBaked(model: Model): boolean
 	return #TerrainInstance.surfaces(model) > 0
 end
 
--- Unparents every baked union (rather than destroying, so undo can bring them back).
+-- Unparents every baked surface (rather than destroying, so undo can bring them back).
 function TerrainInstance.removeSurfaces(model: Model)
 	for _, surface in TerrainInstance.surfaces(model) do
 		surface.Parent = nil
@@ -355,15 +362,82 @@ local function bakeGroup(anchor: BasePart, anchorCFrame: CFrame, parts: { BasePa
 	return precise
 end
 
+export type BakeOptions = {
+	-- UnionOperation.SmoothingAngle of the baked unions.
+	smoothingAngle: number,
+	-- Simplify (degrees, 0 = off): leave out points on ground flatter than this.
+	simplifyAngle: number,
+	-- Tolerance (studs, 0 = off): also leave out points within this of the surface around them.
+	tolerance: number,
+	-- Leave out tile edge points on straight stretches.
+	simplifyEdges: boolean,
+	-- A flat rectangular tile in one look keeps a plain Part instead of a union.
+	flatPart: boolean,
+	-- Flat tiles cast no shadow.
+	flatNoShadow: boolean,
+}
+
+-- Whether the whole tile is flat enough that it shows no shadow worth casting: every grid
+-- triangle within `angle` degrees of the tile's face and every point within `height` studs of
+-- the same height.
+local function isFlat(disp: Displacement.Displacement, positions: { Vector3 }, faceNormal: Vector3, angle: number, height: number): boolean
+	local low, high = math.huge, -math.huge
+	for _, position in positions do
+		local h = position:Dot(faceNormal)
+		low, high = math.min(low, h), math.max(high, h)
+	end
+	if high - low > height then
+		return false
+	end
+	local cosLimit = math.cos(math.rad(angle))
+	for g = 1, Displacement.gridTriangleCount(disp) do
+		local a, b, c = Displacement.gridTriangle(disp, g)
+		local cross = (positions[b] - positions[a]):Cross(positions[c] - positions[a])
+		if cross.Magnitude > 1e-9 and math.abs(cross.Unit:Dot(faceNormal)) < cosLimit then
+			return false
+		end
+	end
+	return true
+end
+
+-- The slab as a plain Part's CFrame and size (model space). When the slab lines up with the
+-- pivot's axes, the Part takes the pivot's rotation (with the size permuted to match), so its
+-- texture axes are the same as the unions'.
+local function alignedSlab(slabCFrame: CFrame, slabSize: Vector3): (CFrame, Vector3)
+	local axes = { slabCFrame.RightVector, slabCFrame.UpVector, slabCFrame.LookVector }
+	local extents = { slabSize.X, slabSize.Y, slabSize.Z }
+	local size = Vector3.zero
+	for i, axis in axes do
+		local x, y, z = math.abs(axis.X), math.abs(axis.Y), math.abs(axis.Z)
+		if math.max(x, y, z) < 1 - 1e-4 then
+			return slabCFrame, slabSize
+		end
+		size += Vector3.new(x, y, z) * extents[i]
+	end
+	return CFrame.new(slabCFrame.Position), size
+end
+
 --[[
 	Merges the wedges into unions so the material maps continuously: one union per look the tile
 	shows (Roblox gives a union a single material), so an unpainted tile bakes to one Surface.
 	Yields while the unions are computed. Does nothing if the displacement is already baked. If
 	any union fails, none are kept and the tile stays as wedges.
+
+	The optimizations in `options` change only what is baked, never the tile's data, so the next
+	edit has full detail again:
+	- Simplify and Tolerance leave points on flat ground out of the unions: they are built from
+	  temporary wedges of a simplified copy. With Simplify straight edges, tile edge points on a
+	  straight stretch go too (they stay within 0.005 studs of the edge, so seams cannot visibly
+	  crack). Painted borders and hole outlines always stay, so looks keep their shape.
+	- Plain Part for flat tiles keeps the flat slab as a Part, skipping the union entirely.
+	- No shadow on flat tiles turns off CastShadow on tiles that are flat.
+
+	Returns how many triangles the tile shows and how many the baked surface has (2 for a flat
+	slab), so callers can report what the optimizations saved; 0, 0 when nothing was baked.
 ]]
-function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
+function TerrainInstance.bake(opened: Opened, options: BakeOptions): (number, number)
 	if TerrainInstance.isBaked(opened.model) then
-		return
+		return 0, 0
 	end
 	TerrainInstance.adoptAppearance(opened)
 	local pivot = opened.model:GetPivot()
@@ -371,28 +445,37 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	local faceNormal = Displacement.faceNormal(disp)
 	local positions = Displacement.positions(disp, faceNormal)
 
-	-- The triangles of each look, in look order (the tile's own look first). Holes are left out.
-	local groups: { [number]: { number } } = {}
-	local order: { number } = {}
-	local holes = false
-	for t = 1, Displacement.triangleCount(disp) do
-		local index = Displacement.shownLookIndex(disp, t)
-		if index == Displacement.HOLE then
-			holes = true
-			continue
+	-- The triangles of each look of shape, in look order (the tile's own look first). Holes are
+	-- left out.
+	local function grouped(shape: Displacement.Displacement): ({ [number]: { number } }, { number }, boolean)
+		local groups: { [number]: { number } } = {}
+		local order: { number } = {}
+		local holes = false
+		for t = 1, Displacement.triangleCount(shape) do
+			local index = Displacement.shownLookIndex(shape, t)
+			if index == Displacement.HOLE then
+				holes = true
+				continue
+			end
+			local group = groups[index]
+			if not group then
+				group = {}
+				groups[index] = group
+				table.insert(order, index)
+			end
+			table.insert(group, t)
 		end
-		local group = groups[index]
-		if not group then
-			group = {}
-			groups[index] = group
-			table.insert(order, index)
-		end
-		table.insert(group, t)
+		table.sort(order)
+		return groups, order, holes
 	end
-	table.sort(order)
+	local groups, order, holes = grouped(disp)
 	if #order == 0 then
 		-- Every triangle is deleted: nothing to union. The hidden wedges stay as they are.
-		return
+		return 0, 0
+	end
+	local before = 0
+	for _, group in groups do
+		before += #group
 	end
 
 	-- A tile in a single look with no holes that is flat bakes from one slab instead of its
@@ -402,13 +485,63 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	if #order == 1 and not holes then
 		slabCFrame, slabSize = flatSlab(disp)
 	end
+	local noShadow = options.flatNoShadow
+		and isFlat(disp, positions, faceNormal, math.max(options.simplifyAngle, 1), math.max(options.tolerance, 1e-3))
+
+	-- A flat slab kept as a plain Part: no union at all.
+	if slabCFrame and slabSize and options.flatPart then
+		local cframe, size = alignedSlab(slabCFrame, slabSize)
+		-- The tile's one look: its own, or a painted look covering all of it.
+		local index = order[1]
+		local look = if index == 0 then Displacement.baseLook(disp) else disp.looks[index]
+		local part = Instance.new("Part")
+		part.Name = if index == 0 then SURFACE_NAME else `{SURFACE_NAME}_{index}`
+		part.Anchored = true
+		part.CanTouch = false
+		part.Size = size
+		part.CFrame = pivot * cframe
+		part.Material = look.material
+		part.Color = look.color
+		part.MaterialVariant = look.variant
+		part.CastShadow = not noShadow
+		part.Parent = opened.model
+		for _, wedge in opened.wedges.parts do
+			wedge.Parent = nil
+		end
+		table.clear(opened.wedges.parts)
+		return before, 2
+	end
+
+	-- The shape the unions are built from: the tile itself, or a simplified copy of it.
+	local shape = disp
 	if slabCFrame and slabSize then
 		local part = Instance.new("Part")
 		part.Anchored = true
 		part.Size = slabSize
 		part.CFrame = pivot * slabCFrame
 		slab = part
-	else
+	elseif options.simplifyAngle > 0 or options.tolerance > 0 or options.simplifyEdges then
+		local extra, mesh = Simplify.flatPointsQuick(disp, {
+			angle = options.simplifyAngle,
+			tolerance = options.tolerance,
+			edges = options.simplifyEdges,
+		})
+		if next(extra) ~= nil then
+			local copy = table.clone(disp)
+			local removed = table.clone(disp.removed)
+			for v in extra do
+				removed[v] = true
+			end
+			copy.removed = removed
+			-- The triangulation the simplify pass ended on, so it is not built again.
+			copy.meshCache = mesh
+			shape = copy
+			groups, order, holes = grouped(shape)
+		end
+	end
+	-- Temporary wedges stand in for the tile's own when baking a simplified copy.
+	local temporary = shape ~= disp
+	if not slab and not temporary then
 		TerrainInstance.ensureWedges(opened)
 	end
 
@@ -435,28 +568,35 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 	anchor.CFrame = anchorCFrame
 
 	local results: { [number]: UnionOperation } = {}
+	local helpers: { BasePart } = {}
 	local ok, err = pcall(function()
 		for _, index in order do
 			local triangles = groups[index]
 			local parts: { BasePart } = {}
 			local min, max = Vector3.one * math.huge, -Vector3.one * math.huge
 			for _, t in triangles do
-				local a, b, c = Displacement.triangle(disp, t)
+				local a, b, c = Displacement.triangle(shape, t)
 				for _, v in { a, b, c } do
 					min = min:Min(positions[v])
 					max = max:Max(positions[v])
 				end
-				if not slab then
+				if not slab and not temporary then
 					table.insert(parts, opened.wedges.parts[t * 2 - 1])
 					table.insert(parts, opened.wedges.parts[t * 2])
 				end
 			end
 			if slab then
 				parts = { slab }
+			elseif temporary then
+				parts = WedgeBuilder.temporary(shape, pivot, triangles)
+				table.move(parts, 1, #parts, #helpers + 1, helpers)
 			end
 			results[index] = bakeGroup(anchor, anchorCFrame, parts, (max - min).Magnitude)
 		end
 	end)
+	for _, part in helpers do
+		part:Destroy()
+	end
 	anchor:Destroy()
 	if slab then
 		slab:Destroy()
@@ -465,6 +605,9 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 		for _, result in results do
 			result:Destroy()
 		end
+		-- The tile may have had no wedges of its own (a simplified copy or a slab baked, or Rebake
+		-- all, which removes the old union first); it must not be left invisible.
+		TerrainInstance.ensureWedges(opened)
 		error(err, 0)
 	end
 
@@ -477,7 +620,8 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 		surface.Material = look.material
 		surface.Color = look.color
 		surface.MaterialVariant = look.variant
-		surface.SmoothingAngle = smoothingAngle
+		surface.SmoothingAngle = options.smoothingAngle
+		surface.CastShadow = not noShadow
 		surface.Parent = opened.model
 	end
 
@@ -486,6 +630,15 @@ function TerrainInstance.bake(opened: Opened, smoothingAngle: number)
 		part.Parent = nil
 	end
 	table.clear(opened.wedges.parts)
+
+	if slab then
+		return before, 2
+	end
+	local after = 0
+	for _, group in groups do
+		after += #group
+	end
+	return before, after
 end
 
 -- Recomputes the cached bounds; pass `positions` when they were just computed.

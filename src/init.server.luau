@@ -111,6 +111,21 @@ local function restoreSettings()
 		if typeof(saved.paintFine) == "boolean" then
 			s.paintFine = saved.paintFine
 		end
+		if typeof(saved.bakeSimplifyAngle) == "number" then
+			s.bakeSimplifyAngle = saved.bakeSimplifyAngle
+		end
+		if typeof(saved.bakeHeightTolerance) == "number" then
+			s.bakeHeightTolerance = saved.bakeHeightTolerance
+		end
+		if typeof(saved.bakeSimplifyEdges) == "boolean" then
+			s.bakeSimplifyEdges = saved.bakeSimplifyEdges
+		end
+		if typeof(saved.bakeFlatPart) == "boolean" then
+			s.bakeFlatPart = saved.bakeFlatPart
+		end
+		if typeof(saved.bakeFlatNoShadow) == "boolean" then
+			s.bakeFlatNoShadow = saved.bakeFlatNoShadow
+		end
 		if typeof(saved.simplifyAngle) == "number" then
 			s.simplifyAngle = saved.simplifyAngle
 		end
@@ -151,6 +166,11 @@ local function saveSettings()
 		paintFine = s.paintFine,
 		ribbonTools = s.ribbonTools,
 		simplifyAngle = s.simplifyAngle,
+		bakeSimplifyAngle = s.bakeSimplifyAngle,
+		bakeHeightTolerance = s.bakeHeightTolerance,
+		bakeSimplifyEdges = s.bakeSimplifyEdges,
+		bakeFlatPart = s.bakeFlatPart,
+		bakeFlatNoShadow = s.bakeFlatNoShadow,
 		meshMode = s.meshMode,
 	})
 end

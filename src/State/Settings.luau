@@ -77,6 +77,16 @@ export type State = {
 	autoBake: boolean,
 	-- UnionOperation.SmoothingAngle for baked surfaces (0 = flat shaded).
 	smoothingAngle: number,
+	-- Baking leaves out points on ground flatter than this (degrees; 0 = off), for lighter unions.
+	bakeSimplifyAngle: number,
+	-- Baking also ignores bumps smaller than this (studs; 0 = off) when simplifying.
+	bakeHeightTolerance: number,
+	-- Baking drops tile edge points that sit on a straight line (crack free).
+	bakeSimplifyEdges: boolean,
+	-- Flat single-look tiles bake to a plain Part instead of a union.
+	bakeFlatPart: boolean,
+	-- Flat baked tiles cast no shadow.
+	bakeFlatNoShadow: boolean,
 	-- Show the key strip at the bottom of the viewport while a tool runs.
 	showKeyHints: boolean,
 	-- Also put the tool buttons on Studio's Plugins ribbon tab (the panel's tool strip has them
@@ -104,6 +114,10 @@ Settings.STITCH_REACH_MIN = 0.5
 Settings.STITCH_REACH_MAX = 16
 Settings.SIMPLIFY_ANGLE_MIN = 0
 Settings.SIMPLIFY_ANGLE_MAX = 45
+Settings.BAKE_SIMPLIFY_MIN = 0
+Settings.BAKE_SIMPLIFY_MAX = 10
+Settings.BAKE_TOLERANCE_MIN = 0
+Settings.BAKE_TOLERANCE_MAX = 0.5
 
 local MODES: { BrushMode } = { "Raise", "Lower", "Smooth", "RaiseTo" }
 local MODE_LABELS: { [BrushMode]: string } = {
@@ -195,6 +209,15 @@ local state: State = table.freeze({
 	stitchParts = true,
 	autoBake = true,
 	smoothingAngle = 45,
+	-- Below what anyone sees, so flat ground bakes lighter without looking different.
+	bakeSimplifyAngle = 1,
+	-- Far below what anyone sees, but enough to flatten brush wobble on level ground.
+	bakeHeightTolerance = 0.05,
+	bakeSimplifyEdges = true,
+	-- Off until texture alignment with neighboring unions is checked in a place.
+	bakeFlatPart = false,
+	-- Off: flat bridges, roofs and plateaus would lose their shadows.
+	bakeFlatNoShadow = false,
 	showKeyHints = true,
 	ribbonTools = false,
 })
@@ -218,6 +241,8 @@ function Settings.update(change: (State) -> ())
 	nextState.noiseMax = math.clamp(nextState.noiseMax, Settings.NOISE_MIN, Settings.NOISE_MAX)
 	nextState.stitchReach = math.clamp(nextState.stitchReach, Settings.STITCH_REACH_MIN, Settings.STITCH_REACH_MAX)
 	nextState.simplifyAngle = math.clamp(nextState.simplifyAngle, Settings.SIMPLIFY_ANGLE_MIN, Settings.SIMPLIFY_ANGLE_MAX)
+	nextState.bakeSimplifyAngle = math.clamp(nextState.bakeSimplifyAngle, Settings.BAKE_SIMPLIFY_MIN, Settings.BAKE_SIMPLIFY_MAX)
+	nextState.bakeHeightTolerance = math.clamp(nextState.bakeHeightTolerance, Settings.BAKE_TOLERANCE_MIN, Settings.BAKE_TOLERANCE_MAX)
 	-- The viewport tools share the mouse: turning one on turns the others off.
 	local turnedOn = if nextState.painting and not state.painting
 		then "painting"
@@ -270,6 +295,13 @@ end
 
 -- Starts `tool`, or stops it when it is already running, like the tools in Studio's terrain
 -- editor. Starting a tool closes Settings or Help so its options are visible.
+-- Whether a tool that edits tiles is running (every tool but Pick faces). Auto-bake waits until
+-- the last of them stops, so switching from one to another does not bake tiles only to unbake
+-- them at the next stroke.
+function Settings.editing(s: State): boolean
+	return s.painting or s.coloring or s.meshing or s.stitching
+end
+
 function Settings.toggleTool(tool: Tool)
 	Settings.update(function(s)
 		if Settings.activeTool(s) == tool then
