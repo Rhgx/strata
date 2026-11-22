@@ -194,8 +194,8 @@ local function MeshPage(props: { settings: Settings.State })
 								setBusy(true)
 								task.spawn(function()
 									run(function()
-										local tiles, points = MeshActions.selectFlat(settings.simplifyAngle)
-										if not mounted.current then
+										local tiles, points, stopped = MeshActions.selectFlat(settings.simplifyAngle)
+										if not mounted.current or stopped then
 											return
 										elseif points == 0 then
 											Status.post("warning", "No points are flat enough within that angle.")

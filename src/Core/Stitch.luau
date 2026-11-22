@@ -591,11 +591,19 @@ end
 --[[
 	Returns `moves` plus the edge vertices of `neighbors` that sit at the same flat spot as a
 	moved vertex, sent to the same target. Where a denser neighbor has vertices in between (a
-	2:1 edge), those are placed along the line between the moved ones. `moves` is not changed.
+	2:1 edge), those are placed along the line between the moved ones. A vertex with a twin on a
+	moving tile that did not move is left alone: on an edge of the same density, the points
+	between two moved ones have their own twins, and moving them would open the seam against
+	those. `moves` is not changed.
 ]]
 function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
-	type Point = { flat: Vector3, target: Vector3 }
+	type Point = { opened: Opened, flat: Vector3, target: Vector3 }
 	local points: { Point } = {}
+	-- Every edge vertex of the moving tiles, moved or not, with where it is now: it tells a
+	-- denser neighbor's in-between vertex (no twin) from one with a twin that stays, and an
+	-- unmoved twin anchors the line those in-between vertices are placed along.
+	type EdgeFlat = { opened: Opened, flat: Vector3, current: Vector3 }
+	local edgeFlats: { EdgeFlat } = {}
 	local min, max = Vector3.one * math.huge, -Vector3.one * math.huge
 	local result: Moves = {}
 	for opened, targets in moves do
@@ -603,10 +611,34 @@ function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
 		local tile = buildTile(opened)
 		for v, target in targets do
 			local flat = flatOf(tile, v)
-			table.insert(points, { flat = flat, target = target })
+			table.insert(points, { opened = opened, flat = flat, target = target })
 			min = min:Min(flat)
 			max = max:Max(flat)
 		end
+		for _, edge in Displacement.edges(opened.disp) do
+			for _, v in edge.indices do
+				table.insert(edgeFlats, { opened = opened, flat = flatOf(tile, v), current = currentOf(tile, v) })
+			end
+		end
+	end
+	-- The twin of `flat` (a vertex of `owner`) on another moving tile, if any; the tile's own edge
+	-- does not count, or a denser neighbor that moves too would never fill in.
+	local function twinOf(flat: Vector3, owner: Opened): EdgeFlat?
+		for _, other in edgeFlats do
+			if other.opened ~= owner and samePoint(flat, other.flat) then
+				return other
+			end
+		end
+		return nil
+	end
+	-- Where a moved vertex of another tile sends `flat`, if one sits there.
+	local function targetOf(flat: Vector3, owner: Opened): Vector3?
+		for _, point in points do
+			if point.opened ~= owner and samePoint(flat, point.flat) then
+				return point.target
+			end
+		end
+		return nil
 	end
 	if #points == 0 then
 		return result
@@ -631,21 +663,27 @@ function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
 			local indices = edge.indices
 			local placed: { [number]: Vector3 } = {}
 			for step, v in indices do
-				if own and own[v] then
-					continue
-				end
 				local flat = flatOf(tile, v)
-				for _, point in points do
-					if samePoint(flat, point.flat) then
-						placed[step] = point.target
-						added[v] = point.target
+				local target = targetOf(flat, opened)
+				if target then
+					placed[step] = target
+					if not (own and own[v]) then
+						added[v] = target
 						any = true
-						break
+					end
+				elseif own and own[v] then
+					-- Its own move anchors the line too.
+					placed[step] = own[v]
+				else
+					-- A twin that stays where it is anchors the line at its current spot.
+					local twin = twinOf(flat, opened)
+					if twin then
+						placed[step] = twin.current
 					end
 				end
 			end
 			-- Fill short runs between two placed vertices (the in-between vertices of a denser
-			-- neighbor along a 2:1 edge).
+			-- neighbor along a 2:1 edge), only where they have no twin of their own.
 			local last: number? = nil
 			for step = 1, #indices do
 				if placed[step] then
@@ -654,8 +692,9 @@ function Stitch.propagate(moves: Moves, neighbors: { Opened }): Moves
 						local a, b = placed[from], placed[step]
 						for k = from + 1, step - 1 do
 							local v = indices[k]
-							if not (own and own[v]) and not added[v] then
+							if not (own and own[v]) and not added[v] and not twinOf(flatOf(tile, v), opened) then
 								added[v] = a:Lerp(b, (k - from) / (step - from))
+								any = true
 							end
 						end
 					end

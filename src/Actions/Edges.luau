@@ -112,6 +112,77 @@ function Edges.restorePins(pins: Stitch.Moves): { Opened }
 	return changed
 end
 
+-- Seam points of neighboring tiles share their flat world position (sewing matches tiles by
+-- their flat corners within 1/16 stud). Points are bucketed in 1 stud cells and compared by
+-- distance across neighboring cells, so a point near a cell border still finds its twin.
+local TWIN_DISTANCE = 1 / 16
+
+export type Twin = { opened: Opened, index: number }
+
+type Entry = { opened: Opened, index: number, flat: Vector3 }
+
+local function cellOf(point: Vector3): Vector3
+	return Vector3.new(math.floor(point.X), math.floor(point.Y), math.floor(point.Z))
+end
+
+local function cellKey(cell: Vector3): string
+	return `{cell.X},{cell.Y},{cell.Z}`
+end
+
+--[[
+	A lookup of the same seam point on other tiles: given a tile and one of its edge points, the
+	edge points of other tiles in `all` at the same flat spot. Built once for many lookups.
+]]
+function Edges.seamTwins(all: { Opened }): (Opened, number) -> { Twin }
+	local cells: { [string]: { Entry } } = {}
+	local flats: { [Opened]: { [number]: Vector3 } } = {}
+	for _, opened in all do
+		local pivot = opened.model:GetPivot()
+		local own: { [number]: Vector3 } = {}
+		for _, edge in Displacement.edges(opened.disp) do
+			for _, v in edge.indices do
+				if not own[v] then
+					local flat = pivot * Displacement.flatPosition(opened.disp, v)
+					own[v] = flat
+					local key = cellKey(cellOf(flat))
+					local list = cells[key]
+					local entry: Entry = { opened = opened, index = v, flat = flat }
+					if list then
+						table.insert(list, entry)
+					else
+						cells[key] = { entry }
+					end
+				end
+			end
+		end
+		flats[opened] = own
+	end
+	return function(opened: Opened, index: number): { Twin }
+		local own = flats[opened]
+		local flat = if own then own[index] else nil
+		local result: { Twin } = {}
+		if not flat then
+			return result
+		end
+		local cell = cellOf(flat)
+		for dx = -1, 1 do
+			for dy = -1, 1 do
+				for dz = -1, 1 do
+					local list = cells[cellKey(cell + Vector3.new(dx, dy, dz))]
+					if list then
+						for _, entry in list do
+							if entry.opened ~= opened and (entry.flat - flat).Magnitude <= TWIN_DISTANCE then
+								table.insert(result, { opened = entry.opened, index = entry.index })
+							end
+						end
+					end
+				end
+			end
+		end
+		return result
+	end
+end
+
 --[[
 	Where `tiles` have removed points on an edge, that edge shows straight between its kept
 	points, so a neighbor's point at the same spot would stick out of the seam and leave a crack.
@@ -189,6 +260,12 @@ function Edges.sewSelected(): (number, string?)
 		warning = sewWarning
 		applySew(sewn)
 		for opened in sewn do
+			changed[opened] = true
+		end
+		-- Sewing averages seam points, which can lift one off an edge a simplified tile shows
+		-- straight (autosew closes them afterwards too). Only the selected tiles' seams.
+		for _, opened in Edges.closeRemovedSeams(targets) do
+			TerrainInstance.save(opened)
 			changed[opened] = true
 		end
 		-- Parts go last so they win at shared corners.

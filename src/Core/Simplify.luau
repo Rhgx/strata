@@ -17,7 +17,7 @@ local Simplify = {}
 
 -- Points that must stay so painted borders and hole outlines keep their shape: every point
 -- where grid triangles with different looks meet.
-local function pinnedPoints(disp: Displacement.Displacement): { [number]: true }
+function Simplify.pinnedPoints(disp: Displacement.Displacement): { [number]: true }
 	local lookAt: { [number]: number } = {}
 	local pinned: { [number]: true } = {}
 	for g = 1, Displacement.gridTriangleCount(disp) do
@@ -108,7 +108,7 @@ function Simplify.flatPoints(disp: Displacement.Displacement, maxAngle: number):
 		end
 	end
 
-	local pinned = pinnedPoints(disp)
+	local pinned = Simplify.pinnedPoints(disp)
 	type Candidate = { v: number, bend: number }
 	local candidates: { Candidate } = {}
 	for v = 1, size * size do
@@ -281,7 +281,7 @@ function Simplify.flatPointsQuick(disp: Displacement.Displacement, shape: BakeSh
 		end
 	end
 
-	local pinned = pinnedPoints(disp)
+	local pinned = Simplify.pinnedPoints(disp)
 	local border: { [number]: true } = {}
 	for _, edge in Displacement.edges(disp) do
 		for _, v in edge.indices do

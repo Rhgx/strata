@@ -33,6 +33,7 @@ local failed: { [Model]: true } = {}
 -- model so it survives `clear`: an undo must not make earlier edits skip their bake.
 local dirty: { [Model]: true } = {}
 local baking = false
+local generation = 0
 
 local Session = {}
 
@@ -95,6 +96,13 @@ end
 function Session.clear()
 	table.clear(cache)
 	table.clear(failed)
+	generation += 1
+end
+
+-- Changes whenever the opened copies are dropped (undo, redo, a cancelled action), so work that
+-- yields can tell its tiles went stale.
+function Session.generation(): number
+	return generation
 end
 
 -- Caches a displacement that was just created, so it is not opened again from attributes.
@@ -174,7 +182,10 @@ function Session.bake(targets: { Opened }, smoothingAngle: number): BakeResult
 			err = tostring(message)
 		end, opened, options)
 		if ok then
-			result.baked += 1
+			-- A tile whose every triangle is deleted has nothing to bake; it is not counted.
+			if before > 0 then
+				result.baked += 1
+			end
 			result.triangles += before
 			result.bakedTriangles += after
 			dirty[opened.model] = nil

@@ -49,16 +49,18 @@ end
 --[[
 	Marks the points of the tiles in scope that can go within `maxAngle` degrees (replacing their
 	earlier marks), so the result can be previewed before Apply. Returns how many tiles got marks
-	and how many points were marked. Yields; stops early (keeping no stale marks) if the Mesh
-	tool stops or leaves Simplify meanwhile, since that clears the marks.
+	and how many points were marked, and whether it stopped early: it yields, and stops (keeping
+	no stale marks) if the Mesh tool stops or leaves Simplify, or an undo replaces the tiles.
 ]]
-function MeshActions.selectFlat(maxAngle: number): (number, number)
+function MeshActions.selectFlat(maxAngle: number): (number, number, boolean)
 	local tiles, points = 0, 0
+	local generation = Session.generation()
 	for _, opened in MeshActions.scope() do
 		local found = Simplify.flatPoints(opened.disp, maxAngle)
 		local settings = Settings.get()
-		if not (settings.meshing and settings.meshMode == "Simplify") then
-			return 0, 0
+		-- An undo or redo meanwhile replaced the tiles (and cleared the marks): stop.
+		if not (settings.meshing and settings.meshMode == "Simplify") or Session.generation() ~= generation then
+			return 0, 0, true
 		end
 		local marks: { [number]: MeshStage.Mark } = {}
 		local count = 0
@@ -72,7 +74,7 @@ function MeshActions.selectFlat(maxAngle: number): (number, number)
 			points += count
 		end
 	end
-	return tiles, points
+	return tiles, points, false
 end
 
 -- Marks every removed point of the tiles in scope to come back. Returns how many tiles.
@@ -91,33 +93,130 @@ function MeshActions.markRestoreAll(): number
 	return tiles
 end
 
+local function isEdgePoint(disp: Displacement.Displacement, v: number): boolean
+	local n = disp.size - 1
+	local row, col = (v - 1) // disp.size, (v - 1) % disp.size
+	return row == 0 or col == 0 or row == n or col == n
+end
+
+--[[
+	Seams must show the same edge on both tiles: a seam point removed on one tile but kept on its
+	neighbor makes each tile's straight edge pull the other's kept points (closeRemovedSeams),
+	and when both tiles have such points the pulls fight and a crack opens. So a mark on an edge
+	point also applies to the same point on neighboring tiles (`marked` gains those marks), and
+	afterwards every removed seam point of the changed tiles is removed on its neighbors too,
+	which also repairs seams left mismatched before. Corners never go, so a neighbor's corner at
+	that spot stays and is pulled onto the straight edge instead.
+]]
+local function mirrorAcrossSeams(marked: { [Opened]: { [number]: MeshStage.Mark } }, twinsOf: (Opened, number) -> { Edges.Twin })
+	local extra: { [Opened]: { [number]: MeshStage.Mark } } = {}
+	-- A neighbor's painted borders and hole outlines keep their points (as Select flat keeps
+	-- them); the seam there is pulled onto the straight edge instead.
+	local pinnedOf: { [Opened]: { [number]: true } } = {}
+	local function isPinned(opened: Opened, v: number): boolean
+		local pinned = pinnedOf[opened]
+		if not pinned then
+			pinned = Simplify.pinnedPoints(opened.disp)
+			pinnedOf[opened] = pinned
+		end
+		return pinned[v] == true
+	end
+	for opened, marks in marked do
+		for v, mark: MeshStage.Mark in marks do
+			if not isEdgePoint(opened.disp, v) then
+				continue
+			end
+			for _, twin in twinsOf(opened, v) do
+				local own = marked[twin.opened]
+				if (own and own[twin.index]) or Displacement.isCorner(twin.opened.disp, twin.index) then
+					continue
+				end
+				if mark == "remove" and isPinned(twin.opened, twin.index) then
+					continue
+				end
+				local list = extra[twin.opened]
+				if not list then
+					list = {}
+					extra[twin.opened] = list
+				end
+				list[twin.index] = mark
+			end
+		end
+	end
+	for opened, marks in extra do
+		local list = marked[opened]
+		if not list then
+			list = {}
+			marked[opened] = list
+		end
+		for v, mark: MeshStage.Mark in marks do
+			list[v] = mark
+		end
+	end
+end
+
 -- Commits every marked point as one undo step and clears the marks. Returns how many tiles and
--- points changed.
+-- points changed (points counted on the marked tiles, not their mirrored neighbors).
 function MeshActions.applyMarks(): (number, number)
 	if MeshStage.isEmpty() then
 		return 0, 0
 	end
 	local tiles, points = 0, 0
 	Recording.run("Strata simplify", function()
-		local changed: { Opened } = {}
+		local marked: { [Opened]: { [number]: MeshStage.Mark } } = {}
 		for model, marks in MeshStage.entries() do
 			local opened = Session.get(model)
-			if not opened then
-				continue
-			end
-			local any = false
-			for v, mark in marks do
-				if Displacement.setRemoved(opened.disp, v, mark == "remove") then
-					any = true
-					points += 1
-				end
-			end
-			if any then
-				Session.updateTopology(opened)
-				table.insert(changed, opened)
+			if opened then
+				marked[opened] = table.clone(marks)
 			end
 		end
-		tiles = #changed
+		local userTiles: { [Opened]: true } = {}
+		for opened in marked do
+			userTiles[opened] = true
+		end
+		local twinsOf = Edges.seamTwins(Session.getAll(Session.models()))
+		mirrorAcrossSeams(marked, twinsOf)
+
+		local changedSet: { [Opened]: true } = {}
+		for opened, marks in marked do
+			for v, mark: MeshStage.Mark in marks do
+				if Displacement.setRemoved(opened.disp, v, mark == "remove") then
+					changedSet[opened] = true
+					if userTiles[opened] then
+						points += 1
+					end
+				end
+			end
+		end
+		-- Removed seam points of the changed tiles go on their neighbors too (see above).
+		local repairs: { [Opened]: { [number]: MeshStage.Mark } } = {}
+		for opened in changedSet do
+			local disp = opened.disp
+			local list: { [number]: MeshStage.Mark } = {}
+			for v in disp.removed do
+				if isEdgePoint(disp, v) then
+					list[v] = "remove"
+				end
+			end
+			repairs[opened] = list
+		end
+		mirrorAcrossSeams(repairs, twinsOf)
+		for opened, marks in repairs do
+			for v, mark: MeshStage.Mark in marks do
+				if Displacement.setRemoved(opened.disp, v, mark == "remove") then
+					changedSet[opened] = true
+				end
+			end
+		end
+
+		local changed: { Opened } = {}
+		for opened in changedSet do
+			Session.updateTopology(opened)
+			table.insert(changed, opened)
+			if userTiles[opened] then
+				tiles += 1
+			end
+		end
 		MeshActions.finish(changed)
 		Recording.autoBake()
 	end)
