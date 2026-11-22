@@ -16,7 +16,7 @@ Editing a baked tile automatically calls `TerrainInstance.ensureWedges`, which u
 
 ### 2. Grouping by look
 
-Triangles are grouped by the look they show (`DispData` `TriLooks`): look `0` (the tile's own) and each painted look. Every group bakes into its own union, all sharing the same anchor cube (below), so textures line up across painted borders as well as across tiles. If any group fails, the unions already made are destroyed and the tile stays as wedges.
+Triangles are grouped by the look they show (`DispData` `TriLooks`): look `0` (the tile's own) and each painted look. Deleted triangles (holes) belong to no group and are left out; a flat tile with holes skips the single-slab shortcut, and a tile whose every triangle is a hole bakes nothing. Every group bakes into its own union, all sharing the same anchor cube (below), so textures line up across painted borders as well as across tiles. If any group fails, the unions already made are destroyed and the tile stays as wedges.
 
 ### 3. Flat slab fast path
 
@@ -72,7 +72,7 @@ Existing wedges are unparented (`part.Parent = nil`) rather than destroyed so `C
 
 - **Auto-bake (`Settings.autoBake`, on by default)**:
   - `Create` and single-step `Shape` / `Edges` actions bake inside their own undo recording (`Recording.autoBake` in `src/Actions/Recording.luau`).
-  - Interactive viewport tools (`BrushTool`, `MaterialTool` and `StitchTool`) keep edited tiles as wedges while active (`Session.markDirty`) and call `Bake.bakeEdited()` (`src/Actions/Bake.luau`) as its own undo step when the tool stops.
+  - Interactive viewport tools (`BrushTool`, `MaterialTool`, `MeshTool` and `StitchTool`) keep edited tiles as wedges while active (`Session.markDirty`) and call `Bake.bakeEdited()` (`src/Actions/Bake.luau`) as its own undo step when the tool stops.
 - **Manual baking**:
   - Select tiles and click `Bake` or `Unbake` on the `Tiles` page (`Bake.bakeSelected`, `Bake.unbakeSelected`).
   - Click `Bake all` on the `Overview` page (`Bake.bakeAll`) when unbaked tiles remain in the place.

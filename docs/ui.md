@@ -6,7 +6,7 @@ Strata's panel (`src/UI/`) is built with React-Lua, `StudioComponents`, and Luci
 
 The panel is divided into three vertical regions:
 
-1. **Tool strip (`src/UI/ToolStrip.luau`)**: a 30 px pinned bar at the top mirroring the seven ribbon tools (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, a vertical divider, then `Pick faces` and `Stitch`) as 26x26 icon buttons so tools stay one click away even when Studio is not on the Plugins ribbon tab. Hidden while an overlay (`Settings` or `Help`) is open.
+1. **Tool strip (`src/UI/ToolStrip.luau`)**: a 30 px pinned bar at the top with the eight viewport tools (also on the ribbon when `Tools on Plugins ribbon` is on in Settings) (`Raise`, `Lower`, `Smooth`, `Raise To`, `Material`, `Mesh`, a vertical divider, then `Pick faces` and `Stitch`) as 24x24 icon buttons so tools stay one click away even when Studio is not on the Plugins ribbon tab. Hidden while an overlay (`Settings` or `Help`) is open.
 2. **Context page (`src/UI/Pages/`)**: occupies the middle area and switches automatically based on what the user is doing, in this priority order:
    - `SettingsPage` or `HelpPage` when `settings.overlay` is `"settings"` or `"help"`.
    - Active viewport tool: `BrushPage` (`painting`), `MaterialPage` (`coloring`), `CreatePage` in pick mode (`picking`), or `StitchPage` (`stitching`).
@@ -68,3 +68,9 @@ Clicking the swatch opens `ColorPicker` inline below the row, laid out like Stud
 - **Brick**: Studio's `BrickColor` palette rendered as a 13-row hexagon of 127 colors above a row of 12 grays, matching Studio's colors, ordering, and grid geometry.
 
 Drags track pointer movement through a transparent full-widget overlay button (the same `PluginGui` input workaround used by `Dropdown`), calling `onPreview` during the drag and `onCommit` once on release so each drag is one undo step. Text inputs commit on focus loss and palette clicks commit immediately.
+
+## Viewport cursors
+
+Each tool's cursor shows what it acts on. The sculpt brushes show one ring (a faint always-on-top copy on the same circle keeps it readable in valleys). The Material tool and the Mesh tool's `Cut holes` mode outline exactly the triangles a click would change. The Mesh tool's `Simplify` mode has no ring: the points a click would remove (or restore) are highlighted over a wireframe of the hovered tile, including the nearest point a click always takes. Stitch and Pick faces highlight parts and faces.
+
+Changing `Radius` in the panel previews the brush in the middle of the 3D view for about a second, with a `Radius 8 st` label (`src/Viewport/RadiusPreview.luau`).

@@ -68,7 +68,8 @@ Serialized and deserialized by `Displacement.save` and `Displacement.load` in `s
 | `OffsetNormals` | `string` | No | Per-vertex subdivision normals (`3 * size^2` floats). Omitted when all equal `faceNormal`. |
 | `Alphas` | `string` | No | Per-vertex blend alphas (`size^2` floats). Omitted when all equal `0`. Kept for Hammer parity; Roblox parts do not blend textures by vertex alpha. |
 | `Looks` | `string` | No | Painted looks as a JSON array of `{ "m": material name, "c": hex color, "v": variant }`. Omitted on unpainted tiles. |
-| `TriLooks` | `string` | No | One character per triangle (`2 * (size - 1)^2`): `0` for the tile's own look, `1` to `9` then `a` to `z` for painted looks 1 to 35. Omitted on unpainted tiles. |
+| `TriLooks` | `string` | No | One character per triangle (`2 * (size - 1)^2`): `0` for the tile's own look, `1` to `9` then `a` to `z` for painted looks 1 to 35, and `-` for a deleted triangle (a hole). Omitted on tiles with no paint and no holes; a tile with holes but no paint saves `Looks` as `[]`. Indexed by grid triangle, whichever points are removed. |
+| `Removed` | `string` | No | One character per vertex (`size^2`): `1` for a point removed by the Mesh tool's `Simplify` mode, `0` otherwise. Corners are never removed. Omitted when no point is removed. |
 
 ### List encoding and omission
 
@@ -79,6 +80,19 @@ Serialized and deserialized by `Displacement.save` and `Displacement.load` in `s
 ### Painted looks
 
 The Material tool (`src/Viewport/MaterialTool.luau`) paints looks per triangle, the smallest piece a tile can show. Hammer blends two textures by vertex alpha instead, which Roblox parts cannot do, so `Alphas` stays unused. On save, `Displacement.compactLooks` drops looks no triangle uses and renumbers the rest, so the `Surface_<k>` unions created at bake time always match the saved palette. Detail changes resample looks by each new triangle's center (`resampleLooks`), and `Split 2x2` copies them triangle for triangle, since quarter quads line up exactly with parent quads.
+
+Holes (the Mesh tool's `Cut holes` mode) are stored in memory as `Displacement.HOLE` (`-1`). A hole only hides its triangle: its vertices stay, so sewing, stitching and the sculpt brushes treat the tile as whole, and restoring a hole brings back the same shape. Unbaked hole wedges stay in place (so wedge numbering never changes) with `Transparency = 1` and collision, queries and shadows off; baking leaves them out of every union. Lowering detail keeps a coarse triangle solid when any of the finer triangles it covers is solid, so thin strips of ground survive, and `Split 2x2` skips quarters whose every triangle is a hole.
+
+### Removed points
+
+Removing points changes how many triangles part of a tile has, not its data: every vertex keeps its normals, distances and offsets, so restoring a point right away is lossless. The shown triangles are a Delaunay triangulation of the kept points on the flat grid (`src/Core/Mesh.luau`): the 4 corners always stay, so the triangles cover the tile exactly, and ties go to Hammer's checkerboard diagonal, so cells away from removed points keep their original triangles. The triangulation depends only on which points are removed, so it is built once and cached while the tile is sculpted.
+
+- **Shown and grid triangles.** Wedges, baking, raycasts and brush updates use shown triangles. Painted looks and holes stay per grid triangle (the save format is unchanged); a shown triangle displays the look most of the grid triangles under it have, and painting a shown triangle writes all of them.
+- **Removed points follow the surface.** After every edit that moves kept points, removed points are re-projected onto the shown triangles (`Displacement.reproject`). A point restored after sculpting lands on the new surface instead of leaving a spike, and smoothing never reads a stale height.
+- **Seams.** A removed edge point makes that edge straight between its kept points. `Edges.closeRemovedSeams` moves the neighbor tile's point at the same spot onto that straight edge, so seams stay closed; autosew runs it after sewing.
+- **Detail and Split.** Raising detail keeps simplified areas simplified (a new point between old ones is removed when any of them was); lowering keeps a point removed when its finer twin was. `Split 2x2` copies removed points, except the ones that become a quarter's corners.
+- **Marking, then applying.** The Mesh tool's `Simplify` mode never changes a tile while you drag: points are marked (`src/Scene/MeshStage.luau`), the tool previews the edges each marked tile would gain and the triangle count, and `Apply` commits every marked tile as one undo step.
+- **Auto-simplify** (`selectFlat` in `src/Actions/Mesh.luau`) marks points greedily, flattest first, while every triangle the removal creates stays within `Max angle` degrees of each original grid triangle under it (compared with the originals, not neighbors, so gentle curves never flatten step by step). Points where different looks or holes meet are never marked, so painted borders keep their shape.
 
 ## Syncing Studio appearance edits
 

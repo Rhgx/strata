@@ -6,10 +6,11 @@ Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement te
 
 - **Create terrain**: convert selected block `Part`s and wedges (`Top`, `Top + sides`, or `All faces`) into tiled displacements, or pick individual faces in the 3D view with the Pick faces tool.
 - **Sculpt**: shape terrain with `Raise`, `Lower`, `Smooth`, and `Raise To` brushes across tile boundaries, with Soft or Hard falloff, six movement axes (`Face normal`, `Up (Y)`, `X`, `Z`, `Picked`, and `Curved (Round)`), and viewport shortcuts (`Ctrl`, `Shift`, `Ctrl + Scroll`, `Alt + Drag`, `Alt + Right Click`).
-- **Stitch to parts**: snap tile edges onto nearby roads, floors, walls, and wedge ramps within a configurable reach, and keep stitched edges pinned across subsequent edits.
+- **Stitch to parts**: snap tile edges onto nearby roads, floors, walls, wedge ramps, and floors built from wedges ("triangle terrain", matched as one outline) within a configurable reach, and keep stitched edges pinned across subsequent edits.
 - **Sew**: weld shared corners, 2:1 T-junctions, and edges between neighboring tiles manually or automatically after edits.
 - **Shape tiles**: change tile detail (power 2, 3, or 4: 5x5, 9x9, or 17x17 vertices), smooth base quads across seams with `Round` (Hammer's Subdivide), apply deterministic `Noise`, and `Split 2x2` losslessly into four smaller tiles one power lower.
 - **Paint materials**: paint a material, color and variant into parts of a tile with the `Material` tool (a road through grass, a rock patch on a slope), in whole grid cells or single triangles; `Ctrl` erases. Each look bakes into its own union, so painted areas keep their own texture.
+- **Mesh density and holes**: the `Mesh` tool's `Simplify` mode removes grid points so an area fills in with fewer, larger triangles (fine detail where the terrain bends, big triangles on flat ground): mark points, check the preview and triangle count, then `Apply`, with `Auto-simplify` marking the points on ground flatter than a `Max angle`; `Cut holes` deletes triangles for paths and openings. `Ctrl` restores either, losslessly.
 - **Appearance**: set tile `Material`, `Color` (RGB, HSV, Hex, and Studio's BrickColor palette), and `MaterialVariant`, or copy a look from any part or tile with the pipette tool.
 - **Bake and reopen**: merge wedges into a `UnionOperation` (automatically or on demand) with configurable `SmoothingAngle`, and bring wedges back automatically whenever a baked tile is edited again.
 
@@ -19,7 +20,7 @@ Strata is a Roblox Studio plugin by Rocks for Valve Hammer-style displacement te
 
 1. Build `Strata.rbxm` (see below) or copy a built `Strata.rbxm` into your local Roblox Studio Plugins folder.
 2. Restart Roblox Studio.
-3. Open the **Strata** panel from the **Plugins** ribbon tab, or launch any of the seven viewport tools directly from the ribbon (all seven also register plugin actions under `File > Advanced > Customize Shortcuts`).
+3. Open the **Strata** panel from the **Plugins** ribbon tab; its tool strip holds all eight viewport tools. Turn on **Settings > Tools on Plugins ribbon** to also put them on the ribbon (all eight register plugin actions under `File > Advanced > Customize Shortcuts` either way).
 
 ### Developing and building
 

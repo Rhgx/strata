@@ -17,7 +17,7 @@ Defined in `src/Core/Units.luau`:
 | Power (`2`, `3`, `4`) | `Detail`: `Low (5x5)`, `Medium (9x9)`, `High (17x17)` | `src/Core/Displacement.luau` |
 | VMF fields (`normals`, `distances`, `offsets`, `offset_normals`, `alphas`, `subdiv`, `elevation`) | Same fields and `GenerateDispSurf` surface formula (`flat + normal * distance + offset + faceNormal * elevation`) | `src/Core/Displacement.luau` |
 | Start corner (`GenerateSurfPointStartIndex`) | `Displacement.startCorner` evaluated in Hammer axes | `src/Core/Displacement.luau` |
-| Checkerboard triangulation (`BuildTriBLtoTR` / `BuildTriTLtoBR`) | `Displacement.triangle` (even quads `00-11`, odd quads `01-10`) | `src/Core/Displacement.luau` |
+| Checkerboard triangulation (`BuildTriBLtoTR` / `BuildTriTLtoBR`) | `Displacement.gridTriangle` (even quads `00-11`, odd quads `01-10`) | `src/Core/Displacement.luau` |
 | Paint Geometry (`Raise/Lower`, `Raise To`, `Smooth`) | `Raise`, `Lower`, `Smooth`, `Raise To` brushes with `Face normal`, `Up (Y)` (Hammer's Z-up default), `X`, `Z`, `Picked` (`Alt + Right Click`), and `Curved (Round)` (`offsetNormals`) axes | `src/Core/Paint.luau`, `src/Viewport/BrushTool.luau` |
 | Subdivide | `Round`: 4-pass Catmull-Clark style smoothing on selected flat base quads; shared edges smooth, outer outline stays sharp; each tile reads the level matching its power while painted displacement rides on top | `src/Core/Subdivide.luau` |
 | Sew | `Sew` and `Auto-sew after edits`: corners (up to 16 faces), 2:1 T-junctions (up to 8 faces), and full/half edges (up to 3 faces) matched within 1 Hammer unit per axis | `src/Core/Sew.luau` |
@@ -27,6 +27,7 @@ Defined in `src/Core/Units.luau`:
 ### Strata additions
 
 - **Stitching (`src/Core/Stitch.luau`, `src/Viewport/StitchTool.luau`, `src/Actions/Edges.luau`)**: snaps tile edges onto nearby block/wedge parts (roads, walls, ramps) and optionally pins stitched edges across later edits (`Keep edges stitched`).
+- **Mesh density and holes (`src/Core/Mesh.luau`, `src/Viewport/MeshTool.luau`, `src/Actions/Mesh.luau`)**: Hammer gives a whole displacement one triangle density. Strata can remove single grid points so an area fills in with fewer, larger triangles (a Delaunay triangulation of the kept points that keeps the checkerboard wherever nothing changed), automatically within a tolerance with `Auto-simplify`, and can delete triangles outright for paths and openings. Both keep the full grid data, so restoring is lossless (see [Data format](data-format.md)).
 - **Split 2x2 (`Displacement.split`, `src/Actions/Shape.luau`)**: losslessly splits a power 3 or 4 tile into four tiles one power lower (each quarter of a `2^p + 1` grid is an exact `2^(p-1) + 1` grid with matching checkerboard parity).
 - **CSG baking (`src/Core/TerrainInstance.luau`)**: merges wedges into a single `UnionOperation` for continuous texture projection (see [Baking](baking.md)).
 
@@ -63,7 +64,7 @@ Hammer's smoothing neighborhood shrinks to zero toward the brush edge and weighs
 
 ### 6. Stitching instead of exact brush-face sewing (`src/Core/Stitch.luau`)
 
-Hammer only flattens displacement edges that already lie directly on a brush face. Because Roblox parts rarely align that closely, Strata matches block and wedge edges within a configurable `Reach` (default `2` studs) as long as the part edge runs within roughly 31 degrees (`MIN_PARALLEL = 0.85`) of the tile edge in the tile plane and is not nearly vertical out of it (`MIN_IN_PLANE = 0.25`). With `extend` enabled, matching edges follow ramps and walls sideways at any height once at least two vertices are in reach. Snapped vertices are propagated to coincident neighbor edges rather than averaged with `Sew`, so the part edge always wins at shared corners.
+Hammer only flattens displacement edges that already lie directly on a brush face. Because Roblox parts rarely align that closely, Strata matches block and wedge edges within a configurable `Reach` (default `2` studs). Edges shared by side-by-side parts are dropped as interior, so a floor built from many wedges ("triangle terrain") matches as one outline. A part edge counts when its side face looks back at the tile edge within about 75 degrees (`OUTWARD_DOT = 0.25`), which keeps near edges and drops far edges and end caps at any reach, and it must not stand nearly vertical out of the tile plane (`MIN_IN_PLANE = 0.25`). Where two candidate edges meet at a bend, vertices past the end of one go to the shared corner, so diagonal outlines leave no V-shaped gaps. With `extend` enabled, matching edges follow ramps and walls sideways at any height once a vertex is in reach. Snapped vertices are propagated to coincident neighbor edges rather than averaged with `Sew`, so the part edge always wins at shared corners.
 
 ### 7. Subdivide winding and centroid timing (`src/Core/Subdivide.luau`)
 
