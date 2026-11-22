@@ -30,7 +30,7 @@ type KeyHint = {
 local QUICK_START = table.concat({
 	"1. <b>Create</b>: select block or wedge parts and click Create, or use Pick faces.",
 	"2. <b>Sculpt</b>: pick a brush in the strip above and drag on terrain. The Material tool paints roads and patches.",
-	"3. <b>Edit</b>: select tiles to change detail, round, split, sew or bake.",
+	"3. <b>Edit</b>: select tiles to change detail, round, split, sew or bake. Edit points moves single points with Studio's Move tool.",
 	"4. <b>Stitch</b>: snap terrain edges onto roads, floors or walls.",
 }, "\n")
 

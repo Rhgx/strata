@@ -1,8 +1,8 @@
 --!strict
 --[[
 	Manages Strata's Plugins ribbon buttons and Studio PluginActions: always creates the Strata
-	panel toggle button, registers bindable PluginActions for all 8 tools (File > Customize
-	Shortcuts), and optionally creates a "Strata Tools" ribbon group when `ribbonTools` is enabled.
+	panel toggle button, registers bindable PluginActions for all 8 tools and Edit points (File >
+	Customize Shortcuts), and optionally creates a "Strata Tools" ribbon group when `ribbonTools` is enabled.
 
 	Studio does not support removing ribbon buttons at runtime (destroying a toolbar has no
 	effect, and recreating a button with the same ID errors). Optional tool buttons are therefore
@@ -19,6 +19,8 @@ local State = Plugin.State
 
 local Status = require(State.Status)
 local Settings = require(State.Settings)
+
+local PointEditor = require(script.Parent.PointEditor)
 
 type Tool = Settings.Tool
 
@@ -98,6 +100,29 @@ return function (plugin: Plugin, widget: DockWidgetPluginGui): () -> ()
 			end)
 		)
 	end
+
+	-- Edit points is not a viewport tool (it never takes the mouse), so it has an action but no
+	-- ribbon button.
+	local editPoints = plugin:CreatePluginAction(
+		"StrataEditPoints",
+		"Strata: Edit points",
+		"Start or stop editing the points of the selected Strata tiles",
+		"",
+		true
+	)
+
+	table.insert(
+		connections,
+		editPoints.Triggered:Connect(function ()
+			widget.Enabled = true
+
+			if Settings.get().editingPoints then
+				Settings.setEditingPoints(false)
+			else
+				PointEditor.enter()
+			end
+		end)
+	)
 
 	local function syncButtons(state: Settings.State)
 		local active = Settings.activeTool(state)

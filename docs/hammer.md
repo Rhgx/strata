@@ -30,6 +30,7 @@ Features beyond Valve Hammer's displacement toolset:
 
 - **Stitching (`Core/Stitch`, `Viewport/StitchTool`, `Actions/Edges`)**: snaps tile edges onto nearby block and wedge parts (roads, walls, ramps, wedge floors) within a configurable `Reach` and optionally pins stitched edges across edits (`Keep edges stitched`).
 - **Mesh density and holes (`Core/Mesh`, `Core/Simplify`, `Viewport/MeshTool`, `Actions/Mesh`)**: removes individual vertices to coarsen flat areas via a Delaunay triangulation (manually or with `Auto-simplify`) and cuts holes by deleting triangles, all losslessly. See [Data format](data-format.md).
+- **Edit points (`Viewport/PointEditor`, `Actions/Edges`)**: places a handle on each point of the selected tiles so single points can be moved with Studio's own Select, Move, Rotate, and Scale tools, keeping seams closed. Hammer edits single vertices only through its paint tools. See [Architecture](architecture.md#edit-points).
 - **Split 2x2 (`Displacement.split`, `Actions/Shape`)**: losslessly splits a `Medium` (power 3) or `High` (power 4) tile into four tiles one power lower, since each quarter of a `2^p + 1` grid is an exact `2^(p-1) + 1` grid with matching checkerboard parity.
 - **CSG baking (`Core/TerrainInstance`)**: merges wedges into `UnionOperation` parts (one per look) for continuous texture projection. See [Baking](baking.md).
 

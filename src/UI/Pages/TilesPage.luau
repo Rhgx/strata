@@ -19,6 +19,8 @@ local Settings = require(State.Settings)
 
 local Query = require(Plugin.Scene.Query)
 
+local PointEditor = require(Plugin.Viewport.PointEditor)
+
 local Bake = require(Actions.Bake)
 local Edges = require(Actions.Edges)
 local Shape = require(Actions.Shape)
@@ -456,11 +458,26 @@ local function TilesPage(props: { settings: Settings.State, info: Query.Selectio
 				.. "> Change `Reach` in the `Stitch` tool or `Settings`."),
 		}),
 
-		BakeDivider = Rows.divider(9),
-		Bake = bakeRow(10, info),
+		EditPoints = Rows.button(
+			9,
+			"Edit points",
+			function ()
+				run(function ()
+					PointEditor.enter()
+				end)
+			end,
+			"**Move single points** with Studio's own tools.\n\n"
+				.. "Puts a handle on every point of the selected tiles: select them in 3D and use `Move`, `Rotate`, or `Scale`.\n\n"
+				.. "> Seams stay closed. `Ctrl + Z` undoes each move.",
+			false,
+			Icons.EditPoints
+		),
+
+		BakeDivider = Rows.divider(10),
+		Bake = bakeRow(11, info),
 
 		Noise = Rows.collapsible(
-			11,
+			12,
 			"noise",
 			"Noise",
 			"**Add random bumps** to selected tiles.\n\n"

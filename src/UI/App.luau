@@ -3,8 +3,8 @@
 	Root panel layout: tool strip at the top, active page in the middle, status bar at the bottom.
 
 	Page selection follows user context like Studio's Properties window, in priority order:
-	Settings or Help overlay when open, the active viewport tool's page, the current Studio
-	selection (selected tiles to edit or parts to convert), and otherwise the place overview.
+	Settings or Help overlay when open, the active viewport tool's page, Edit points, the current
+	Studio selection (selected tiles to edit or parts to convert), and otherwise the place overview.
 ]]
 
 local UI = script.Parent
@@ -34,6 +34,7 @@ local TilesPage = require(Pages.TilesPage)
 local CreatePage = require(Pages.CreatePage)
 local StitchPage = require(Pages.StitchPage)
 local MaterialPage = require(Pages.MaterialPage)
+local PointsPage = require(Pages.PointsPage)
 local OverviewPage = require(Pages.OverviewPage)
 local SettingsPage = require(Pages.SettingsPage)
 
@@ -42,7 +43,7 @@ local e = React.createElement
 local STATUS_HEIGHT = 24
 local STRIP_HEIGHT = 30
 
-type Page = "settings" | "help" | "brush" | "material" | "mesh" | "pick" | "stitch" | "tiles" | "parts" | "overview"
+type Page = "settings" | "help" | "brush" | "material" | "mesh" | "pick" | "stitch" | "points" | "tiles" | "parts" | "overview"
 
 type Context = {
 	page: Page,
@@ -71,6 +72,9 @@ local function context(settings: Settings.State): Context
 		page = "pick"
 	elseif settings.stitching then
 		page = "stitch"
+	elseif settings.editingPoints then
+		-- Selecting point handles deselects the tiles, so this page cannot follow the selection.
+		page = "points"
 	elseif info.count > 0 then
 		-- When both tiles and parts are selected, TilesPage uses the parts for Sew tiles.
 		page = "tiles"
@@ -120,6 +124,8 @@ local function idleText(settings: Settings.State, ctx: Context): string
 		return "Pick faces, then Create."
 	elseif page == "stitch" then
 		return if hasTiles then "Click a part to stitch." else "No terrain yet."
+	elseif page == "points" then
+		return "Move points with Studio's tools."
 	elseif page == "tiles" then
 		if settings.sampling then
 			return "Click a part to copy its look (Esc cancels)."
@@ -154,6 +160,8 @@ local function body(settings: Settings.State, ctx: Context)
 		return e(CreatePage, { settings = settings, picking = true })
 	elseif page == "stitch" then
 		return e(StitchPage, { settings = settings })
+	elseif page == "points" then
+		return e(PointsPage)
 	elseif page == "tiles" then
 		return e(TilesPage, { settings = settings, info = ctx.info })
 	elseif page == "parts" then

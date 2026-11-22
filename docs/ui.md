@@ -10,8 +10,9 @@ The panel is split into three vertical regions:
 2. **Context page (`src/UI/Pages/`)**: occupies the middle area, keyed by page name so switching contexts always resets scroll position to the top. Pages are chosen in this priority order:
    1. **Overlays (`SettingsPage`, `HelpPage`)**: shown when `settings.overlay` is `"settings"` or `"help"`. `Settings` pins three tabs (`Edges`, `Baking`, `Interface`) below its header; only the active tab's rows scroll, and the last opened tab persists for the Studio session. `Rebake all (N)` on `Baking` requires a second confirmation click within 4 seconds when a place has more than 20 tiles.
    2. **Active viewport tool**: `BrushPage` (`painting`), `MaterialPage` (`coloring`), `MeshPage` (`meshing`), `CreatePage` in pick mode (`picking`), or `StitchPage` (`stitching`). Every tool page opens with `Rows.title`: the tool's name plus an icon-only Stop button (`Esc`). In `MeshPage`'s `Simplify` mode, the `Result` row (`768 to 12 tris`) and `Apply` / `Clear` buttons appear below `Auto-simplify` only while points are staged so `Select flat` never shifts under the cursor.
-   3. **Studio selection**: `TilesPage` when any tile is selected (even alongside normal parts, since `Sew tiles` uses them), or `CreatePage` when eligible block/wedge parts are selected.
-   4. **Fallback (`OverviewPage`)**: shows total and baked tile counts (unbaked counts in `WarningText`), `Select all`, `Pick faces`, and `Bake all (N)` as the primary button when unbaked tiles exist (or getting-started steps in an empty place).
+   3. **Edit points (`PointsPage`)**: shown while `editingPoints` is on, since selecting point handles deselects the tiles. Shows `N of M selected` points, the edited tile count, how to move points with Studio's tools, `Select all points`, and `Done` (which selects the tiles again and bakes them when `Bake automatically` is on). Started from `Edit points` on `TilesPage` or its `PluginAction`.
+   4. **Studio selection**: `TilesPage` when any tile is selected (even alongside normal parts, since `Sew tiles` uses them), or `CreatePage` when eligible block/wedge parts are selected.
+   5. **Fallback (`OverviewPage`)**: shows total and baked tile counts (unbaked counts in `WarningText`), `Select all`, `Pick faces`, and `Bake all (N)` as the primary button when unbaked tiles exist (or getting-started steps in an empty place).
 3. **Status bar (`src/UI/StatusBar.luau`)**: a 24 px pinned footer showing the latest `State/Status` message (green for success, `WarningText` for warnings, `ErrorText` for errors, `MainText` for progress like `Baking 3 of 12...`; click to dismiss; hover for full text) or a context-aware idle hint, plus the Settings gear and Help `?` overlay buttons on the right.
 
 ### Reactive hooks and helpers
@@ -23,7 +24,7 @@ The panel is split into three vertical regions:
 
 ## Viewport shortcuts and tools
 
-All eight tools register bindable `PluginAction`s under `File > Advanced > Customize Shortcuts` (`src/Viewport/Toolbar.luau`). While a tool runs, `KeyStrip` shows active shortcuts along the bottom of the 3D view (toggleable under `Settings > Interface > Show viewport key hints`).
+All eight tools and Edit points register bindable `PluginAction`s under `File > Advanced > Customize Shortcuts` (`src/Viewport/Toolbar.luau`). While a tool runs, `KeyStrip` shows active shortcuts along the bottom of the 3D view (toggleable under `Settings > Interface > Show viewport key hints`).
 
 ### Shared shortcuts
 
@@ -53,6 +54,7 @@ All eight tools register bindable `PluginAction`s under `File > Advanced > Custo
 | `Pick faces` | `Click` | Pick or unpick a part face |
 | `Pick faces` | `Enter` | Create tiles from picked faces |
 | `Stitch` | `Click` | Stitch nearby tile edges onto the clicked part (and joined sheet) |
+| Edit points | Studio's `Select`, `Move`, `Rotate`, `Scale` | Pick point handles (click, `Ctrl + Click`, drag a box) and move them; each drag or Properties edit is one undo step |
 
 ### Sculpt movement axes
 

@@ -62,6 +62,10 @@ export type State = {
 	stitching: boolean,
 	-- Copy appearance mode: the next click on a part copies its look onto selected tiles.
 	sampling: boolean,
+	-- Edit points: handles on the chosen tiles' points, moved with Studio's own Select, Move,
+	-- Rotate, and Scale tools. It never takes the mouse, but it still excludes every viewport
+	-- tool, since those would edit the same tiles underneath the handles.
+	editingPoints: boolean,
 	-- Session-only overlay (Settings or Help) covering the panel.
 	overlay: Overlay,
 	-- Maximum distance in studs a tile edge may move to snap onto a part edge when stitching.
@@ -215,6 +219,7 @@ local state: State = table.freeze({
 	picking = false,
 	stitching = false,
 	sampling = false,
+	editingPoints = false,
 	overlay = "none" :: Overlay,
 	-- Covers road and curb thickness plus small gaps without grabbing parts across a path.
 	stitchReach = 2,
@@ -313,6 +318,14 @@ function Settings.update(change: (State) -> ())
 		nextState.picking = turnedOn == "picking"
 		nextState.stitching = turnedOn == "stitching"
 		nextState.sampling = turnedOn == "sampling"
+		nextState.editingPoints = false
+	elseif nextState.editingPoints and not state.editingPoints then
+		nextState.painting = false
+		nextState.coloring = false
+		nextState.meshing = false
+		nextState.picking = false
+		nextState.stitching = false
+		nextState.sampling = false
 	end
 
 	if not nextState.coloring then
@@ -352,11 +365,21 @@ function Settings.activeTool(s: State): Tool?
 	return nil
 end
 
--- Returns whether a tile-editing tool is active (every viewport tool except Pick faces).
--- Auto-bake waits until all editing tools stop so switching between tools does not bake tiles
--- only to unbake them on the next stroke.
+-- Returns whether a tile-editing tool is active (every viewport tool except Pick faces, plus
+-- Edit points). Auto-bake waits until all editing tools stop so switching between tools does not
+-- bake tiles only to unbake them on the next stroke.
 function Settings.editing(s: State): boolean
-	return s.painting or s.coloring or s.meshing or s.stitching
+	return s.painting or s.coloring or s.meshing or s.stitching or s.editingPoints
+end
+
+-- Turns Edit points on or off. Kept apart from stopViewportTool, which runs whenever Studio takes
+-- the mouse back: Edit points exists precisely to keep working while Studio's tools have it.
+function Settings.setEditingPoints(on: boolean)
+	if state.editingPoints ~= on then
+		Settings.update(function (s)
+			s.editingPoints = on
+		end)
+	end
 end
 
 -- Starts `tool`, or stops it when already active (matching Studio's terrain editor).

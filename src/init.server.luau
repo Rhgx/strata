@@ -14,6 +14,7 @@ local startToolbar = require(Viewport.Toolbar)
 local startMeshTool = require(Viewport.MeshTool)
 local startBrushTool = require(Viewport.BrushTool)
 local PickFaceTool = require(Viewport.PickFaceTool)
+local PointEditor = require(Viewport.PointEditor)
 local startSampleTool = require(Viewport.SampleTool)
 local startStitchTool = require(Viewport.StitchTool)
 local startActivation = require(Viewport.Activation)
@@ -274,10 +275,12 @@ widget.Name = "StrataPanel"
 widget.Title = "Strata"
 widget.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
--- Closing the panel stops any active tool so no brush holds the mouse while hidden.
+-- Closing the panel stops any active tool so no brush holds the mouse while hidden, and ends
+-- Edit points so no handles are left in the place without their panel.
 widget:GetPropertyChangedSignal("Enabled"):Connect(function ()
 	if not widget.Enabled then
 		Settings.stopViewportTool()
+		Settings.setEditingPoints(false)
 		Settings.setOverlay("none")
 		saveSettings()
 	end
@@ -296,6 +299,7 @@ end)
 local stopPickFaceTool = PickFaceTool.start(plugin)
 local stopStitchTool = startStitchTool(plugin)
 local stopSampleTool = startSampleTool(plugin)
+local stopPointEditor = PointEditor.start()
 
 -- Mount the panel only while open so a closed panel does no work on Studio selection changes.
 local root = ReactRoblox.createRoot(Instance.new("Folder"))
@@ -318,6 +322,7 @@ plugin.Unloading:Connect(function ()
 	stopPickFaceTool()
 	stopStitchTool()
 	stopSampleTool()
+	stopPointEditor()
 	stopActivation()
 	stopToolbar()
 	stopSession()

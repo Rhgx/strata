@@ -266,6 +266,24 @@ function Edges.closeRemovedSeams(tiles: { Opened }): { Opened }
 	return changed
 end
 
+-- Moves points to exact world positions (`moves`, as from Edit points) and keeps every seam they
+-- touch closed: coincident points on other tiles follow, points along a denser neighbor's 2:1
+-- edge are interpolated, and a simplified neighbor's removed twin comes back so it can follow.
+-- Returns every changed tile; the caller saves them. Call inside a recording.
+function Edges.movePoints(moves: Stitch.Moves): { Opened }
+	local _, moved = applyMoves(moves)
+	local changed: { Opened } = table.clone(moved)
+
+	-- A moved point next to a simplified tile's straight edge can leave a neighbor point off it.
+	for _, opened in Edges.closeRemovedSeams(moved) do
+		if not table.find(changed, opened) then
+			table.insert(changed, opened)
+		end
+	end
+
+	return changed
+end
+
 -- Sews `focus` tiles against every displacement in the place. When Keep edges stitched is on,
 -- edges that touched a part beforehand (`pins`, or sampled now) are restored afterwards so part
 -- edges take precedence at shared corners. Call inside a recording.
