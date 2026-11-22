@@ -126,14 +126,30 @@ function TriangleBrush.write(opened: Opened, grids: { number }, target: number, 
 	local disp = opened.disp
 	local shown: { [number]: true } = {}
 	local changed: { number } = {}
+	local writtenGrids: { [number]: true } = {}
 
 	for _, g in grids do
 		if disp.triLooks[g] ~= target and eligible(g) then
 			disp.triLooks[g] = target
+			writtenGrids[g] = true
 
 			local t = Displacement.shownOf(disp, g)
 
 			if not shown[t] then
+				shown[t] = true
+				table.insert(changed, t)
+			end
+		end
+	end
+
+	-- A thin shown triangle that covers no grid triangle takes its look from the grid triangle
+	-- under its center (see Displacement.coverOf), which belongs to another shown triangle, so it
+	-- is refreshed too when that grid triangle changes. Otherwise it keeps showing its old look.
+	local mesh = Displacement.mesh(disp)
+
+	if mesh and next(writtenGrids) ~= nil then
+		for t, cover in mesh.cover do
+			if #cover == 0 and not shown[t] and writtenGrids[Displacement.coverOf(disp, t)[1]] then
 				shown[t] = true
 				table.insert(changed, t)
 			end
