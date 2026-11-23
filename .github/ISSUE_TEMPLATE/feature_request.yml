@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest a new feature or an improvement to an existing one.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like Strata to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What's the use case or problem it solves?
+  - type: textarea
+    id: hammer
+    attributes:
+      label: How Hammer / Hammer++ handles it, if relevant
+      description: Behavior, shortcuts, or settings from Hammer that this should match.
+  - type: textarea
+    id: extra
+    attributes:
+      label: Mockups, screenshots, or references
+      description: Drag files here.
