@@ -22,7 +22,7 @@ Turn block and wedge parts into editable displacement tiles, sculpt and paint th
 
 ## Install
 
-1. Get `Strata.rbxm` from a release, or [build it from source](#build-from-source).
+1. Download `Strata.rbxm` from the [latest release](https://github.com/Rhgx/strata/releases/latest), or [build it from source](#build-from-source).
 2. Copy it into Studio's plugins folder (**Plugins > Plugins Folder**).
 3. Restart Studio and open **Strata** from the **Plugins** tab.
 
@@ -44,11 +44,13 @@ Turn block and wedge parts into editable displacement tiles, sculpt and paint th
 
 Requires [Aftman](https://github.com/LPGhatguy/aftman) (`aftman.toml`: Rojo 7.7.1, Wally 0.3.2).
 
-```powershell
+```sh
 aftman install
 wally install
 rojo build --plugin Strata.rbxm   # builds straight into Studio's plugins folder
 ```
+
+On Linux, or to write the file somewhere else, use `rojo build -o Strata.rbxm`.
 
 Build a release copy into `dist/Strata.rbxm` (verifies `src/Version.luau` and `wally.toml` match):
 
@@ -70,8 +72,7 @@ To run the dev-only Jest-Lua unit tests in Studio, see [Testing](docs/testing.md
 
 ## License
 
-Copyright (C) 2026 Rocks. Licensed under the GNU General Public License v3.0 or later; see [LICENSE](LICENSE).
+Strata is licensed under the **GNU General Public License v3.0 or later** ([LICENSE](LICENSE)), Copyright (C) 2026 Rocks.
 
-Terrain, models, and places you create with Strata are yours, under any license you choose. The GPL covers only Strata's own code.
-
-Bundled packages keep their own licenses: React-Lua, StudioComponents, and `lucide-icons` (MIT), and Lucide icon art (ISC). `src/UI/Dropdown.luau` is adapted from StudioComponents (MIT); its notice is preserved in that file.
+- **Your creations are yours**: terrain, models, and places made with Strata are not covered by the GPL and can be used under any license (including commercial games).
+- **Third-party code**: bundled packages keep their own licenses (React-Lua, StudioComponents, and `lucide-icons` are MIT; Lucide icon art is ISC).

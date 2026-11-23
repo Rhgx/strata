@@ -22,7 +22,10 @@ User guide and technical reference for the Strata Roblox Studio plugin.
 
 Brand icons live in `assets/logo/`:
 
-- `strata-dark.svg` and `strata-light.svg`: 32 px theme-matched icons for the README and Plugins ribbon (`src/Viewport/Toolbar.luau`).
+- `strata-dark.svg` and `strata-light.svg`: theme-matched source icons, used directly by the README.
+- `strata-dark-32.png`, `strata-dark-64.png`, `strata-light-32.png`, `strata-light-64.png`: raster exports uploaded as the Plugins ribbon icons (`LOGO` in `src/Viewport/Toolbar.luau`).
 - `strata-store.png` and `strata-store.svg`: 512 px store icon.
+
+The 1280x640 GitHub social preview banner lives at `assets/social-preview.png` (`assets/social-preview.svg` source).
 
 Panel UI icons come from `latte-soft/lucide-icons` (`src/UI/Icons.luau`). Optional Plugins ribbon tool buttons use Studio's built-in `rbxasset://studio_svg_textures/` icons.
